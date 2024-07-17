@@ -1,6 +1,6 @@
 --data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
---model_name mono_drop_20_oracle_rgbd_pose_rgbd_sparse_6_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8
---load_weights_root /data/laiyan/codes/PLNet/tmp/mono_drop_20_oracle_rgbd_pose_rgbd_sparse_6_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8/models/
+--model_name mono_drop_20_oracle_rgbd_pose_rgbd_enc_7_add_4_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8
+--load_weights_root /data/laiyan/codes/PLNet/tmp/mono_drop_20_oracle_rgbd_pose_rgbd_enc_7_add_4_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8/models/
 --frame_ids 0 -2 2
 --batch_size 32
 --num_workers 12
@@ -22,5 +22,6 @@
 --oracle
 --scale_by_tof_depth_type 8
 --weighted_ls_type 12
+--encoder_type 7
 --drop_rate 0.2
---encoder_type 6
+--addition_type 4

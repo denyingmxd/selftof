@@ -1284,13 +1284,6 @@ class AdditionNetwork_1(nn.Module):
         self.convs = {}
 
         for i in range(len(num_ch_enc)-1,-1,-1):
-        #     self.positional_encodings[i] = nn.Parameter(torch.rand(args.zone_num, num_ch_enc[i]), requires_grad=True)
-        #     self.positional_encodings2[i] = nn.Parameter(torch.rand(args.zone_num, num_ch_enc[i]), requires_grad=True)
-        # # https://github.com/facebookresearch/dino/blob/main/vision_transformer.py#L161
-        #     nn.init.trunc_normal_(self.positional_encodings[i], std=0.2)
-        #     nn.init.trunc_normal_(self.positional_encodings2[i], std=0.2)
-
-            # self.cas[i] = LoFTREncoderLayer(num_ch_enc[i], 8)
             self.convs[('down',i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
 
 
@@ -1306,18 +1299,19 @@ class AdditionNetwork_1(nn.Module):
             depth_features_low = torch.nn.functional.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
             low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
             resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
-            resized_tof_mask_flatten = resized_tof_mask.reshape(-1,rgb_feature_down.shape[2]*rgb_feature_down.shape[3])
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> b (h w) c')
             rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
             depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
-            rgb_affine = torch.matmul(rgb_feature_down_flatten, rgb_feature_down_flatten.transpose(1, 2))
-            rgb_affine[resized_tof_mask_flatten.unsqueeze(1).repeat(1,rgb_affine.shape[-1],1) == 0.] = -1e9
+            rgb_affine = torch.matmul(rgb_feature_down_flatten, rgb_feature_down_flatten.transpose(1, 2))/math.sqrt(rgb_feature_down_flatten.shape[-1])
+            rgb_affine[resized_tof_mask_flatten.repeat(1,1,rgb_affine.shape[-1]) == 0.] = -1e9
             rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
             depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten)
             depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
             depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
             final_features.append(depth_new+rgb_feature)
-        print(123)
+
         return final_features
+
 
 class AdditionNetwork_2(nn.Module):
     def __init__(self, num_ch_enc, args):
@@ -1331,15 +1325,10 @@ class AdditionNetwork_2(nn.Module):
         self.args = args
         self.convs = {}
         self.position_embeddings = {}
-
         for i in range(len(num_ch_enc)-1,-1,-1):
             self.position_embeddings[str(i)] = nn.Parameter(torch.rand(9*12, num_ch_enc[i]), requires_grad=True)
-        #     self.positional_encodings2[i] = nn.Parameter(torch.rand(args.zone_num, num_ch_enc[i]), requires_grad=True)
         # # https://github.com/facebookresearch/dino/blob/main/vision_transformer.py#L161
-        #     nn.init.trunc_normal_(self.positional_encodings[i], std=0.2)
-        #     nn.init.trunc_normal_(self.positional_encodings2[i], std=0.2)
-
-            # self.cas[i] = LoFTREncoderLayer(num_ch_enc[i], 8)
+            nn.init.trunc_normal_(self.position_embeddings[str(i)], std=0.2)
             self.convs[('down',i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
 
         self.addition = nn.ModuleList(list(self.convs.values()))
@@ -1355,12 +1344,94 @@ class AdditionNetwork_2(nn.Module):
             depth_features_low = torch.nn.functional.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
             low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
             resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
-            resized_tof_mask_flatten = resized_tof_mask.reshape(-1,rgb_feature_down.shape[2]*rgb_feature_down.shape[3])
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> b (h w) c')
             rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
             rgb_feature_down_flatten = rgb_feature_down_flatten + self.position_embeddings[str(i)]
             depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
+            rgb_affine = torch.matmul(rgb_feature_down_flatten, rgb_feature_down_flatten.transpose(1, 2))/math.sqrt(rgb_feature_down_flatten.shape[-1])
+            rgb_affine[resized_tof_mask_flatten.repeat(1,1,rgb_affine.shape[-1]) == 0.] = -1e9
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+            depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
+            final_features.append(depth_new+rgb_feature)
+
+        return final_features
+
+class AdditionNetwork_3(nn.Module):
+    def __init__(self, num_ch_enc, args):
+        super(AdditionNetwork_3, self).__init__()
+        self.num_ch_enc = num_ch_enc
+        #64,144,192
+        #64, 72,96
+        #128, 36, 48
+        #256, 18, 24
+        #512, 9, 12
+        self.args = args
+        self.convs = {}
+
+        for i in range(len(num_ch_enc)-1,-1,-1):
+            self.convs[('down',i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+
+
+        self.addition = nn.ModuleList(list(self.convs.values()))
+    def forward(self, rgb_features, depth_features,inputs):
+
+        final_features = []
+        for i in range(len(rgb_features)):
+            rgb_feature = rgb_features[i]
+            depth_feature = depth_features[i]
+
+            rgb_feature_down = self.convs[('down',i)](rgb_feature)
+            depth_features_low = torch.nn.functional.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
+            resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> b (h w) c')
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
             rgb_affine = torch.matmul(rgb_feature_down_flatten, rgb_feature_down_flatten.transpose(1, 2))
-            rgb_affine[resized_tof_mask_flatten.unsqueeze(1).repeat(1,rgb_affine.shape[-1],1) == 0.] =  -1e9
+            rgb_affine[resized_tof_mask_flatten.repeat(1,1,rgb_affine.shape[-1]) == 0.] = -1e9
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+            depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
+            final_features.append(depth_new+rgb_feature)
+
+        return final_features
+
+class AdditionNetwork_4(nn.Module):
+    def __init__(self, num_ch_enc, args):
+        super(AdditionNetwork_4, self).__init__()
+        self.num_ch_enc = num_ch_enc
+        #64,144,192
+        #64, 72,96
+        #128, 36, 48
+        #256, 18, 24
+        #512, 9, 12
+        self.args = args
+        self.convs = {}
+
+        for i in range(len(num_ch_enc)-1,-1,-1):
+            self.convs[('down',i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+
+
+        self.addition = nn.ModuleList(list(self.convs.values()))
+    def forward(self, rgb_features, depth_features,inputs):
+
+        final_features = []
+        for i in range(len(rgb_features)):
+            rgb_feature = rgb_features[i]
+            depth_feature = depth_features[i]
+
+            rgb_feature_down = self.convs[('down',i)](rgb_feature)
+            depth_features_low = torch.nn.functional.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
+            resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> b (h w) c')
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
+            rgb_affine = torch.matmul(rgb_feature_down_flatten, rgb_feature_down_flatten.transpose(1, 2))/math.sqrt(rgb_feature_down_flatten.shape[-1])
+            # rgb_affine[resized_tof_mask_flatten.repeat(1,1,rgb_affine.shape[-1]) == 0.] = -1e9
             rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
             depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten)
             depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
