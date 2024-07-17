@@ -1316,7 +1316,7 @@ class AdditionNetwork_1(nn.Module):
             depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
             depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
             final_features.append(depth_new+rgb_feature)
-
+        print(123)
         return final_features
 
 class AdditionNetwork_2(nn.Module):
