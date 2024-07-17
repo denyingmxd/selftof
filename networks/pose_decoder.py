@@ -32,11 +32,12 @@ class PoseDecoder(nn.Module):
 
         self.net = nn.ModuleList(list(self.convs.values()))
 
-    def forward(self, input_features):
+    def forward(self, input_features,args,outputs):
         last_features = [f[-1] for f in input_features]
 
         cat_features = [self.relu(self.convs["squeeze"](f)) for f in last_features]
         cat_features = torch.cat(cat_features, 1)
+
 
         out = cat_features
         for i in range(3):
@@ -44,11 +45,17 @@ class PoseDecoder(nn.Module):
             if i != 2:
                 out = self.relu(out)
 
+
+
         out = out.mean(3).mean(2)
 
         out = 0.01 * out.view(-1, self.num_frames_to_predict_for, 1, 6)
-
+        # out = torch.randn(1, self.num_frames_to_predict_for, 1, 6).to(input_features[-1][-1].device)
         axisangle = out[..., :3]
         translation = out[..., 3:]
-
+        if args.global_scale_pose_type>0:
+            ratios = outputs[('global_ratio',0)]
+            if args.global_scale_pose_type==2:
+                ratios = ratios.detach().clone()
+            translation = translation*ratios
         return axisangle, translation

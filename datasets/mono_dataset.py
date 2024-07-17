@@ -15,7 +15,10 @@ from PIL import Image  # using pillow-simd for increased speed
 import torch
 import torch.utils.data as data
 from torchvision import transforms
-
+import math
+from einops import rearrange
+from matplotlib.patches import Rectangle
+import matplotlib.pyplot as plt
 
 def pil_loader(path):
     # open path as file to avoid ResourceWarning
@@ -51,7 +54,8 @@ class MonoDataset(data.Dataset):
                  num_plane_keysets=512,
                  return_line=False,
                  num_line_keysets=128,
-                 img_ext='.jpg'):
+                 img_ext='.jpg',
+                 opt=None):
         super(MonoDataset, self).__init__()
 
         self.data_path = data_path
@@ -95,14 +99,18 @@ class MonoDataset(data.Dataset):
         self.load_plane = return_plane and self.check_plane()
         self.load_line = return_line and self.check_line()
 
-        if self.load_plane or self.load_line:
-            self.pl_resize = {}
+        self.load_seg = opt.load_seg or opt.weighted_ls_type==13
+
+        if self.load_plane or self.load_line or self.load_seg:
+            self.plk_resize = {}
             self.num_plane_keysets = num_plane_keysets
             self.num_line_keysets = num_line_keysets
             for i in range(self.num_scales):
                 s = 2 ** i
-                self.pl_resize[i] = transforms.Resize((self.height // s, self.width // s),
+                self.plk_resize[i] = transforms.Resize((self.height // s, self.width // s),
                                                       interpolation=Image.NEAREST)
+
+        self.opt = opt
 
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
@@ -118,10 +126,10 @@ class MonoDataset(data.Dataset):
                 for i in range(self.num_scales):
                     inputs[(n, im, i)] = self.resize[i](inputs[(n, im, i - 1)])
 
-            if "plane" in k or "line" in k:
+            if "plane" in k or "line" in k or 'seg' in k:
                 n, im, i = k
                 for i in range(self.num_scales):
-                    inputs[(n, im, i)] = self.pl_resize[i](inputs[(n, im, i - 1)])
+                    inputs[(n, im, i)] = self.plk_resize[i](inputs[(n, im, i - 1)])
 
         for k in list(inputs):
             f = inputs[k]
@@ -132,13 +140,16 @@ class MonoDataset(data.Dataset):
                 inputs[(n, im, i)] = self.to_tensor(f)
                 inputs[(n + "_aug", im, i)] = self.to_tensor(color_aug(f))
 
-            if "plane" in k or "line" in k:
+            if "plane" in k or "line" in k or 'seg' in k:
                 n, im, i = k
                 if i == -1 and not self.is_test:
                     continue
 
                 f = np.expand_dims(np.array(f), 0)
                 inputs[(n, im, i)] = torch.from_numpy(f).long()
+
+                if 'seg' in k:
+                    continue
 
                 num_struct_keysets = self.num_plane_keysets if n == "plane" else self.num_line_keysets
                 if num_struct_keysets == 0:
@@ -201,10 +212,13 @@ class MonoDataset(data.Dataset):
         """
         inputs = {}
 
-        do_color_aug = self.is_train and random.random() > 0.5
+        # do_color_aug = self.is_train and random.random() > 0.5
+        do_color_aug = False
         do_flip = self.is_train and random.random() > 0.5
 
         line = self.filenames[index].split()
+        # line[-1] = '00272'
+        # line[-1] = '00027'
         folder = line[0]
 
         if len(line) >= 2:
@@ -256,11 +270,43 @@ class MonoDataset(data.Dataset):
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
+            if 'tof' in self.opt.sparse_d_type:
+                if self.opt.drop_rate>0:
+                    if self.is_test:
+                        drop_mask = np.load(os.path.join(self.data_path, folder, "{:05d}".format(frame_index) + "_fixed_mask_drop_{}.npz").format(str(self.opt.drop_rate)))['fixed_mask']
+                    else:
+                        drop_mask = np.load(os.path.join(self.data_path, folder, str(frame_index) + "_fixed_mask_drop_{}.npz").format(str(self.opt.drop_rate)))['fixed_mask']
+                else:
+                    drop_mask = None
+
+                tof_depth,additional = self.get_tof_depth(inputs["depth_gt"],drop_mask)
+                if self.opt.sparse_d_type=='tof_disp':
+                    valid = tof_depth>0
+                    tof_depth = 1./(tof_depth+1e-7)
+                    tof_depth[~valid] = 0
+                inputs[("tof_depth",0)] = tof_depth
+                inputs[("additional",0)] = additional
+
+                rest_idxs = self.frame_idxs.copy()
+                rest_idxs.remove(0)
+                for xx in rest_idxs:
+                    depth_gt = self.get_depth(folder, frame_index+xx, side, do_flip)
+                    depth_gt = np.expand_dims(depth_gt, 0)
+                    depth_gt = torch.from_numpy(depth_gt.astype(np.float32))
+                    tof_depth, additional = self.get_tof_depth(depth_gt,drop_mask)
+                    inputs[("tof_depth",xx)] = tof_depth
+                    inputs[("additional",xx)] = additional
+
+
+
         if self.load_plane:
             inputs[("plane", 0, -1)] = self.get_plane(folder, frame_index, side, do_flip)
 
         if self.load_line:
             inputs[("line", 0, -1)] = self.get_line(folder, frame_index, side, do_flip)
+
+        if self.load_seg and self.is_train:
+            inputs[("seg", 0, -1)] = self.get_seg(folder, frame_index, side, do_flip)
 
         self.preprocess(inputs, color_aug)
 
@@ -275,6 +321,9 @@ class MonoDataset(data.Dataset):
 
         if self.load_line and not self.is_test:
             del inputs[("line", 0, -1)]
+
+        if self.load_seg and not self.is_test:
+            del inputs[("seg", 0, -1)]
 
         if "s" in self.frame_idxs:
             stereo_T = np.eye(4, dtype=np.float32)
@@ -295,6 +344,9 @@ class MonoDataset(data.Dataset):
     def get_depth(self, folder, frame_index, side, do_flip):
         raise NotImplementedError
 
+    def get_seg(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
     def check_plane(self):
         raise NotImplementedError
 
@@ -306,3 +358,285 @@ class MonoDataset(data.Dataset):
 
     def get_line(self, folder, frame_index, side, do_flip):
         raise NotImplementedError
+
+    def sample_point_from_hist_parallel(self,hist_data, mask, config):
+        znum = int(math.sqrt(mask.numel()))
+        fh = torch.zeros([znum ** 2, config.zone_sample_num], dtype=torch.float32)
+        zone_sample_num = config.zone_sample_num
+
+        delta = 1e-3
+        sample_ppf = torch.Tensor(np.arange(delta, 1, (1 - 2 * delta) / (zone_sample_num - 1)).tolist()).unsqueeze(
+            0)
+        d = torch.distributions.Normal(hist_data[mask, 0:1], hist_data[mask, 1:2])
+        fh[mask] = d.icdf(sample_ppf).to(torch.float32)
+        return fh
+
+    def get_hist_parallel(self,dep):
+        # share same interval/area
+        height, width = dep.shape[1], dep.shape[2]
+
+        max_distance = self.opt.simu_max_distance
+        range_margin = list(np.arange(0, max_distance + 1e-9, 0.04))
+
+
+        patch_height, patch_width = height//self.opt.zone_num, width//self.opt.zone_num
+
+        if self.opt.oracle:
+            self.opt.simu_max_distance=100.0
+            max_distance = 100.0
+            range_margin = list(np.arange(0, max_distance + 1e-9, 0.04))
+            patch_height, patch_width = height//self.opt.zone_num, width//self.opt.zone_num
+
+        offset = 0
+        train_zone_num = self.opt.zone_num
+        sy = int((height - patch_height * train_zone_num) / 2) + offset
+        sx = int((width - patch_width * train_zone_num) / 2) + offset
+        dep_extracted = dep[:, sy:sy + patch_height * train_zone_num, sx:sx + patch_width * train_zone_num]
+        dep_patches = dep_extracted.unfold(2, patch_width, patch_width).unfold(1, patch_height, patch_height)
+        dep_patches = dep_patches.contiguous().view(-1, patch_height, patch_width)
+        hist = torch.stack(
+            [torch.histc(x, bins=int(max_distance / 0.04), min=0, max=max_distance) for x in dep_patches], 0)
+
+        # choose cluster with strongest signal, then fit the distribution
+        # first, mask out depth smaller than 4cm, which is usually invalid depth, i.e., zero
+        hist[:, 0] = 0
+        hist = torch.clip(hist - 20, 0, None)
+        for i, bin_data in enumerate(hist):
+            idx = np.where(bin_data != 0)[0]
+            idx_split = np.split(idx, np.where(np.diff(idx) != 1)[0] + 1)
+            bin_data_split = np.split(bin_data[idx], np.where(np.diff(idx) != 1)[0] + 1)
+            signal = np.argmax([torch.sum(b) for b in bin_data_split])
+            hist[i, :] = 0
+            hist[i, idx_split[signal]] = bin_data_split[signal]
+
+        dist = ((torch.Tensor(range_margin[1:]) + np.array(range_margin[:-1])) / 2).unsqueeze(0)
+        sy = torch.Tensor(list(range(sy, sy + patch_height * train_zone_num, patch_height)) * train_zone_num).view(
+            [train_zone_num, -1]).T.reshape([-1])
+        sx = torch.Tensor(list(range(sx, sx + patch_width * train_zone_num, patch_width)) * train_zone_num)
+        fr = torch.stack([sy, sx, sy + patch_height, sx + patch_width], dim=1)
+
+        mask = torch.zeros([train_zone_num, train_zone_num], dtype=torch.bool)
+        n = torch.sum(hist, dim=1)
+        mask = n > 0
+        mask = mask.reshape([-1])
+        mu = torch.sum(dist * hist, dim=1) / (n + 1e-9)
+        std = torch.sqrt(torch.sum(hist * torch.pow(dist - mu.unsqueeze(-1), 2), dim=1) / (n + 1e-9)) + 1e-9
+        fh = torch.stack([mu, std], axis=1).reshape([train_zone_num, train_zone_num, 2])
+        fh = fh.reshape([-1, 2])
+
+        return fh, fr, mask
+
+    def get_tof_depth(self, full_depth,drop_mask):
+        full_depth = torch.nn.functional.interpolate(full_depth.unsqueeze(0), (self.opt.height, self.opt.width), mode='nearest')[0]
+        hist_data, fr, mask = self.get_hist_parallel(full_depth)
+        if drop_mask is not None:
+            mask = mask * drop_mask
+        hist_data[~(mask.bool()), :] = 0
+        original_mask = mask.clone()
+        original_hist_data = hist_data.clone()
+
+
+        # fh = sample_point_from_hist_parallel(hist_data, mask, self.args)
+        # patch_info = patch_info_from_rect_data(fr)
+        my_mask = torch.zeros_like(full_depth)
+        aa, bb = fr[0, :2].int()
+        cc, dd = fr[-1, 2:].int()
+        aa, bb = max(0, aa), max(0, bb)
+        cc, dd = min(full_depth.shape[1], cc), min(full_depth.shape[2], dd)
+        my_mask[:, aa:cc, bb:dd, ] = 1
+
+
+        # tof_mean = torch.zeros_like(full_depth)
+        n = int(math.sqrt(hist_data.shape[0]))
+        p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
+        # tof_unfold = (hist_data[:, 0] * mask).unsqueeze(0).unsqueeze(-1).repeat(1, 1, p1 * p2)
+        # tof_mean[:, aa:cc, bb:dd] = rearrange(tof_unfold, ' c (zn1 zn2) (p1 p2) ->c (zn1 p1) (zn2 p2)', zn1=n,
+        #                                        zn2=n, p1=p1, p2=p2)
+
+        # if self.is_train and self.opt.drop_hist > 1e-3 and (not self.opt.oracle):
+        #     index = np.where(mask == True)[0]
+        #     index = np.random.choice(index, int(len(index)*self.opt.drop_hist))
+        #     mask[index] = False
+        # if self.is_train and self.opt.noise_prob > 1e-3 and (not self.opt.oracle):
+        #     prob = np.random.random(hist_data[mask,0].shape)
+        #     noise_mask = prob < self.opt.noise_prob
+        #     noise = np.random.normal(self.opt.noise_mean, self.opt.noise_sigma, hist_data[mask,0].shape)
+        #     hist_data[mask,0][noise_mask] += noise[noise_mask]
+
+        if 'area_mean' in self.opt.sparse_depth_input_type:
+            tof_depth = torch.zeros_like(full_depth)
+            low_tof = (hist_data[:, 0] * mask).unsqueeze(0)
+            low_tof = rearrange(low_tof, ' c (zn1 zn2) ->c (zn1) (zn2)', zn1=n,zn2=n)
+            tof_mask = torch.zeros_like(full_depth).bool()
+            low_mask = mask.clone()
+            low_mask = rearrange(low_mask, ' (zn1 zn2) -> (zn1) (zn2)', zn1=n, zn2=n).float()
+            high_mask = torch.nn.functional.interpolate(low_mask.unsqueeze(0).unsqueeze(0),
+                                                        (cc-aa, dd-bb),
+                                                        mode='nearest')[0, 0]
+            tof_mask[:, aa:cc, bb:dd] = high_mask
+
+
+            case=self.opt.sparse_depth_input_type.split('area_mean')[-1]
+            if '_bilinear' ==case:
+                high_tof = torch.nn.functional.interpolate(low_tof.unsqueeze(0),
+                                                           (cc-aa, dd-bb),
+                                                           mode='bilinear',
+                                                           align_corners=False)[0, 0]
+            elif '_bilinear_align'==case:
+                high_tof = torch.nn.functional.interpolate(low_tof.unsqueeze(0),
+                                                           (cc-aa, dd-bb),
+                                                           mode='bilinear',
+                                                           align_corners=True)[0, 0]
+            else:
+                high_tof = torch.nn.functional.interpolate(low_tof.unsqueeze(0),
+                                                           (cc-aa, dd-bb),
+                                                           mode='nearest')[0, 0]
+
+
+            tof_depth[:, aa:cc, bb:dd] = high_tof
+
+        tof_mean = tof_depth.mean(0,True)
+        # tof_mean = torch.zeros_like(full_depth)
+        # n = int(math.sqrt(hist_data.shape[0]))
+        # p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
+        # tof_unfold = (hist_data[:, 0] * mask).unsqueeze(0).unsqueeze(-1).repeat(1, 1, p1 * p2)
+        # tof_mean[:, aa:cc, bb:dd] = rearrange(tof_unfold, ' c (zn1 zn2) (p1 p2) ->c (zn1 p1) (zn2 p2)', zn1=n,
+        #                                        zn2=n, p1=p1, p2=p2)
+
+
+        # if 'area_mean' in self.opt.sparse_depth_input_type:
+        #     tof_depth = torch.zeros_like(full_depth)
+        #     n = int(math.sqrt(hist_data.shape[0]))
+        #     p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
+        #     tof_unfold = (hist_data[:, 0] * mask).unsqueeze(0).unsqueeze(-1).repeat(1, 1, p1 * p2)
+        #     tof_depth[:, aa:cc, bb:dd] = rearrange(tof_unfold, ' c (zn1 zn2) (p1 p2) ->c (zn1 p1) (zn2 p2)', zn1=n,
+        #                                           zn2=n, p1=p1, p2=p2)
+        #
+        # if 'area_multi' in self.opt.sparse_depth_input_type:
+        #     tof_depth = torch.zeros_like(full_depth).repeat(int(self.opt.sparse_depth_input_type.split('_')[-1]), 1, 1)
+        #     n = int(math.sqrt(hist_data.shape[0]))
+        #     p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
+        #     self.opt.zone_sample_num = int(self.opt.sparse_depth_input_type.split('_')[-1])
+        #     fh = self.sample_point_from_hist_parallel(hist_data, mask, self.opt)
+        #     tof_unfold = (fh * mask.unsqueeze(-1)).permute(1, 0).unsqueeze(-1).repeat(1, 1, p1 * p2)
+        #     tof_depth[:, aa:cc, bb:dd] = rearrange(tof_unfold, ' c (zn1 zn2) (p1 p2) ->c (zn1 p1) (zn2 p2)', zn1=n,
+        #                                            zn2=n, p1=p1, p2=p2)
+        # if self.opt.sparse_depth_input_type == 'single_mean':
+        #     tof_depth = torch.zeros_like(full_depth)
+        #     center_x = torch.floor((fr[mask > 0][:, 0] + fr[mask > 0][:, 2]) / 2).long()
+        #     center_y = torch.floor((fr[mask > 0][:, 1] + fr[mask > 0][:, 3]) / 2).long()
+        #     tof_depth[:, center_x, center_y] = hist_data[mask, 0].unsqueeze(0).float()
+
+        if 'area' in self.opt.sparse_depth_input_type and self.opt.extend_fov:
+            fr_grid = fr.reshape(self.opt.zone_num, self.opt.zone_num, 4)
+            mask_grid = mask.reshape(self.opt.zone_num, self.opt.zone_num)
+            for i in [0, -1]:
+                for j in range(1, self.opt.zone_num - 1):
+                    if mask_grid[i, j] == 0:
+                        continue
+                    aaa, bbb, ccc, ddd = fr_grid[i, j].int()
+                    aaa, bbb = max(0, aaa), max(0, bbb)
+                    ccc, ddd = min(full_depth.shape[1], ccc), min(full_depth.shape[2], ddd)
+                    cropped_tof = tof_depth[:, aaa:ccc, bbb:ddd]
+                    if i == 0:
+                        tof_depth[:, :aaa, bbb:ddd] = cropped_tof.mean([1, 2], True)
+                    else:
+                        tof_depth[:, ccc:, bbb:ddd] = cropped_tof.mean([1, 2], True)
+            for j in [0, -1]:
+                for i in range(1, self.opt.zone_num - 1):
+                    if mask_grid[i, j] == 0:
+                        continue
+                    aaa, bbb, ccc, ddd = fr_grid[i, j].int()
+                    aaa, bbb = max(0, aaa), max(0, bbb)
+                    ccc, ddd = min(full_depth.shape[1], ccc), min(full_depth.shape[2], ddd)
+                    cropped_tof = tof_depth[:, aaa:ccc, bbb:ddd]
+                    if j == 0:
+                        tof_depth[:, aaa:ccc, :bbb] = cropped_tof.mean([1, 2], True)
+                    else:
+                        tof_depth[:, aaa:ccc, ddd:] = cropped_tof.mean([1, 2], True)
+            for i in [0, -1]:
+                for j in [0, -1]:
+                    if mask_grid[i, j] == 0:
+                        continue
+                    aaa, bbb, ccc, ddd = fr_grid[i, j].int()
+                    aaa, bbb = max(0, aaa), max(0, bbb)
+                    ccc, ddd = min(full_depth.shape[1], ccc), min(full_depth.shape[2], ddd)
+                    cropped_tof = tof_depth[:, aaa:ccc, bbb:ddd]
+                    if i == 0 and j == 0:
+                        tof_depth[:, :ccc, :ddd] = cropped_tof.mean([1, 2], True)
+                    elif i == 0 and j == -1:
+                        tof_depth[:, :ccc, bbb:] = cropped_tof.mean([1, 2], True)
+                    elif i == -1 and j == 0:
+                        tof_depth[:, aaa:, :ddd] = cropped_tof.mean([1, 2], True)
+                    else:
+                        tof_depth[:, aaa:, bbb:] = cropped_tof.mean([1, 2], True)
+        additional = {
+            'hist_data': hist_data.to(torch.float),
+            'original_hist_data': original_hist_data.to(torch.float),
+            'rect_data': fr.to(torch.float),
+            'mask': mask,
+            'original_mask': original_mask,
+            # 'patch_info': patch_info,
+            'my_mask': my_mask,
+            'tof_depth': tof_depth,
+            'tof_mean': tof_mean,
+            'tof_mask': tof_mask,
+        }
+        # plt.imshow(image.transpose(1,2,0)/255.)
+        #
+        # for i, xxx in enumerate(fr):
+        #     a, b, c, d = xxx
+        #     if mask[i]:
+        #         plt.gca().add_patch(Rectangle((b, a), c - a, d - b,
+        #                                   edgecolor='red',
+        #                                   facecolor='none',
+        #                                   lw=4))
+        # plt.show()
+        #
+        #
+        # plt.imshow(full_depth.permute(1,2,0))
+        # plt.colorbar()
+        # for i, xxx in enumerate(fr):
+        #     a, b, c, d = xxx
+        #     if mask[i]:
+        #         plt.gca().add_patch(Rectangle((b, a), c - a, d - b,
+        #                                   edgecolor='red',
+        #                                   facecolor='none',
+        #                                   lw=4))
+        # plt.show()
+        #
+        # plt.imshow(image.transpose(1,2,0)/255.)
+        #
+        # for i, xxx in enumerate(fr):
+        #     a, b, c, d = xxx
+        #     if mask[i]:
+        #         plt.gca().add_patch(Rectangle((b, a), c - a, d - b,
+        #                                       edgecolor='red',
+        #                                       facecolor='none',
+        #                                       lw=4))
+        # plt.show()
+        #
+        # plt.imshow(sample['depth'].permute(1, 2, 0))
+        # plt.colorbar()
+        # for i, xxx in enumerate(fr):
+        #     a, b, c, d = xxx
+        #     if mask[i]:
+        #         plt.gca().add_patch(Rectangle((b, a), c - a, d - b,
+        #                                       edgecolor='red',
+        #                                       facecolor='none',
+        #                                       lw=4))
+        # plt.show()
+        #
+        # plt.imshow(hist_data[:, 0].reshape(8, 8))
+        # plt.colorbar()
+        # plt.show()
+        # plt.imshow(hist_data[:, 1].reshape(8, 8))
+        # plt.colorbar()
+        # plt.show()
+        # plt.imshow(fh.mean(1).reshape(8, 8))
+        # plt.colorbar()
+        # plt.show()
+
+        return tof_depth, additional
+
+

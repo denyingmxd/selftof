@@ -4,9 +4,9 @@ import os
 import numpy as np
 import PIL.Image as pil
 import cv2
-
+from PIL import Image
 from .mono_dataset import MonoDataset
-
+import torch
 
 class NYUDataset(MonoDataset):
     """NYU dataset loaders
@@ -70,7 +70,7 @@ class NYUDataset(MonoDataset):
 
     def get_color(self, folder, frame_index, side, do_flip):
         color = self.loader(self.get_image_path(folder, frame_index, side))
-
+        # print(self.get_image_path(folder, frame_index, side))
         color = color.crop((self.edge_crop, self.edge_crop, 640-self.edge_crop, 480-self.edge_crop))
 
         if do_flip:
@@ -110,6 +110,20 @@ class NYUDataset(MonoDataset):
             depth_gt = np.fliplr(depth_gt)
 
         return depth_gt
+
+    def get_seg(self, folder, frame_index, side, do_flip):
+
+
+        seg_path = os.path.join(self.data_path, folder, str(frame_index) + "_segformer.npz")
+
+        seg_pred = np.load(seg_path)['arr_0']
+        seg_pred = seg_pred[self.edge_crop:480-self.edge_crop, self.edge_crop:640-self.edge_crop]
+
+
+        if do_flip:
+            seg_pred = np.fliplr(seg_pred)
+        seg_pred = Image.fromarray(seg_pred.astype(np.uint8))
+        return seg_pred
 
     def get_plane(self, folder, frame_index, side, do_flip):
         plane = pil.open(self.get_plane_path(folder, frame_index, side))
@@ -160,3 +174,4 @@ class NYUDataset(MonoDataset):
         norm_pix_coords = np.stack(((Us - self.K[0, 2]) / self.K[0, 0], (Vs - self.K[1, 2]) / self.K[1, 1]), axis=0)
 
         return norm_pix_coords
+

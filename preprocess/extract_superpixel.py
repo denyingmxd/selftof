@@ -96,7 +96,7 @@ for scene in train_scenes:
     [results.append(future.result()) for future in tqdm.tqdm(futures)]
 
 
-for filename in test_files:
+for filename in tqdm.tqdm(test_files):
 
     index = int(filename.split('/')[-1].split('_')[0])
     segment = extract_superpixel(filename)

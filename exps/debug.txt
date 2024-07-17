@@ -1,0 +1,27 @@
+--data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
+--model_name debug
+--frame_ids 0 -2 2
+--batch_size 4
+--num_workers 1
+--distributed
+--learning_rate 1e-4
+--num_epochs 40
+--scheduler_step_size 30
+--depth_repr disp
+--sparse_d_type tof
+--rgbd_encoder
+--rgbd_pose_encoder
+--sparse_depth_input_type area_mean
+--sparse_depth_loss_type area_L2
+--sparse_depth_loss_weight 0.01
+--disable_plane_smoothness
+--smoothness_weight 0.1
+--disable_plane_regularization
+--disable_line_regularization
+--scale_by_tof_depth_type 8
+--encoder_type 7
+--conv_block_type 0
+--addition_type 2
+--weighted_ls_type 12
+--oracle
+--drop_rate 0.2

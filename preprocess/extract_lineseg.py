@@ -13,7 +13,7 @@ import tqdm
 from functools import partial
 
 import argparse
-
+# from pylsd import lsd
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_path', type=str,
@@ -40,8 +40,10 @@ def extract_lineseg(filename):
 
     corp_image = image[CROP:-CROP, CROP:-CROP]
 
-    lsd = cv2.createLineSegmentDetector(0, _scale=1)
-    lines = lsd.detect(corp_image)[0]
+    # lsd = cv2.createLineSegmentDetector(0, _scale=1)
+    # lines = lsd.detect(corp_image)[0]
+    fld = cv2.ximgproc.createFastLineDetector()
+    lines = fld.detect(corp_image)
     lines = np.squeeze(lines, 1)
     lengths = np.sqrt((lines[:, 0] - lines[:, 2]) ** 2 + (lines[:, 1] - lines[:, 3]) ** 2)
     arr1inds = lengths.argsort()[::-1]
@@ -115,7 +117,7 @@ for scene in train_scenes:
     [results.append(future.result()) for future in tqdm.tqdm(futures)]
 
 
-for filename in test_files:
+for filename in tqdm.tqdm(test_files):
 
     index = int(filename.split('/')[-1].split('_')[0])
     line_seg = extract_lineseg(filename)

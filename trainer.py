@@ -22,7 +22,7 @@ from layers import *
 
 import datasets
 import networks
-from IPython import embed
+# from IPython import embed
 
 
 class Trainer:
@@ -127,7 +127,7 @@ class Trainer:
 
         self.backproject_depth = {}
         self.project_3d = {}
-        self.project_homo = {}
+        # self.project_homo = {}
         for scale in self.opt.scales:
             h = self.opt.height // (2 ** scale)
             w = self.opt.width // (2 ** scale)
@@ -164,7 +164,7 @@ class Trainer:
         """
         self.epoch = 0
         self.step = 0
-        self.val()
+        # self.val()
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()

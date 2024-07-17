@@ -1,0 +1,15 @@
+--data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
+--model_name mono_naive_ep_40_sm_0.01
+--load_weights_root /data/laiyan/codes/PLNet/tmp/mono_naive_ep_40_sm_0.01/models/
+--frame_ids 0 -2 2
+--batch_size 32
+--num_workers 12
+--distributed
+--learning_rate 1e-4
+--num_epochs 40
+--scheduler_step_size 30
+--smoothness_weight 0.01
+--depth_repr disp
+--disable_plane_smoothness
+--disable_plane_regularization
+--disable_line_regularization

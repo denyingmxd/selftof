@@ -12,7 +12,7 @@ from utils import readlines
 from options import MonodepthOptions
 import datasets
 import networks
-
+import tqdm
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
@@ -198,7 +198,7 @@ def evaluate(opt):
 
     norm_pix_coords = dataset.get_norm_pix_coords()
 
-    for i in range(pred_disps.shape[0]):
+    for i in tqdm.tqdm(range(pred_disps.shape[0])):
 
         gt_depth = gt_depths[i]
         gt_height, gt_width = gt_depth.shape[:2]

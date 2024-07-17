@@ -1,0 +1,5 @@
+--data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
+--model_name plnet3f_reproduce
+--frame_ids 0 -2 2
+--batch_size 12
+--num_workers 12

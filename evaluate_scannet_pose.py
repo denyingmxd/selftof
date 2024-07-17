@@ -39,6 +39,7 @@ def compute_pose_errors(gt, pr):
 
     # fit scales to translations
     a = np.dot(t1, t2) / np.dot(t2, t2)
+    # a=1
     tcm = 100*np.sqrt(np.sum((t1-a*t2)**2, axis=-1))
 
     if np.isnan(rdeg) or np.isnan(tdeg) or np.isnan(tcm):
@@ -51,11 +52,23 @@ def prepare_model_for_test(opt):
     pose_encoder_path = os.path.join(opt.load_weights_folder, "pose_encoder.pth")
     pose_decoder_path = os.path.join(opt.load_weights_folder, "pose.pth")
 
-    pose_encoder = networks.ResnetEncoder(opt.num_layers, False, 2)
+    opt.num_pose_frames = 2 if opt.pose_model_input == "pairs" else opt.num_input_frames
+
+    # pose_encoder = networks.ResnetEncoder(opt.num_layers, False, 2)
+    if opt.rgbd_pose_encoder:
+        pose_encoder = networks.RGBD_Encoder(opt.num_layers,False,num_input_images=opt.num_pose_frames, args=opt)
+    else:
+        pose_encoder = networks.ResnetEncoder(opt.num_layers,False,num_input_images=opt.num_pose_frames)
+
     pose_decoder = networks.PoseDecoder(pose_encoder.num_ch_enc, 1, 1)
 
-    pose_encoder.load_state_dict(torch.load(pose_encoder_path))
-    pose_decoder.load_state_dict(torch.load(pose_decoder_path))
+    pose_encoder_dict = torch.load(pose_encoder_path)
+    pose_decoder_dict = torch.load(pose_decoder_path)
+    torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(pose_encoder_dict, "module.")
+    torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(pose_decoder_dict, "module.")
+
+    pose_encoder.load_state_dict(pose_encoder_dict)
+    pose_decoder.load_state_dict(pose_decoder_dict)
     
     pose_encoder.cuda().eval()
     pose_decoder.cuda().eval()
@@ -85,12 +98,16 @@ def evaluate(opt):
     with torch.no_grad():
         for ind, inputs in enumerate(tqdm(dataloader)):
             for key, ipt in inputs.items():
-                inputs[key] = ipt.cuda()
+                if 'additional' not in key:
+                    inputs[key] = ipt.to('cuda')
+                else:
+                    for k, v in ipt.items():
+                        inputs[key][k] = v.to('cuda')
             color = torch.cat(
                     [inputs[("color", i, 0)] for i in opt.frame_ids], 
                     dim = 1,
             )
-            features = pose_encoder(color)
+            features = pose_encoder(color,inputs,index=opt.frame_ids[1])
             axisangle, translation = pose_decoder([features])
             this_pose = transformation_from_parameters( 
                     axisangle[:, 0], 
