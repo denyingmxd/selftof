@@ -109,49 +109,17 @@ def convbnrelu(in_channels, out_channels, kernel_size=3,stride=1, padding=1):
 	)
 
 
-def convbnrelu_Sparse(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+
+def convbnrelu_Sub(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+    assert stride == 1
+
     return spconv.SparseSequential(
-        spconv.SparseConv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False),
+        spconv.SubMConv2d(in_channels, out_channels, kernel_size, 1),
         nn.BatchNorm1d(out_channels),
         nn.ReLU(inplace=True)
     )
 
 
-def convbnrelu_Sub(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-    if stride==2:
-        return spconv.SparseSequential(
-            spconv.SparseMaxPool2d(2, 2),
-            spconv.SubMConv2d(in_channels, out_channels, kernel_size, 1),
-            nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-    elif stride==1:
-        return spconv.SparseSequential(
-            spconv.SubMConv2d(in_channels, out_channels, kernel_size, 1),
-            nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-    else:
-        raise NotImplementedError
-
-def convlnrelu_Sub(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-    if stride==2:
-        return spconv.SparseSequential(
-            spconv.SparseMaxPool2d(2, 2),
-            spconv.SubMConv2d(in_channels, out_channels, kernel_size, 1),
-            nn.LayerNorm(out_channels),
-            nn.ReLU(inplace=True)
-        )
-    elif stride==1:
-        return spconv.SparseSequential(
-            spconv.SubMConv2d(in_channels, out_channels, kernel_size, 1),
-            nn.LayerNorm(out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-    else:
-        raise NotImplementedError
 
 class DepthEncoder(nn.Module):
     def __init__(self,num_ch_enc,d_num,num_input_images):
@@ -188,215 +156,7 @@ class DepthEncoder(nn.Module):
         return features
 
 
-class DepthEncoder_Sparse(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_Sparse, self).__init__()
-        self.num_ch_enc = num_ch_enc
 
-        self.pre_conv = convbnrelu_Sparse(d_num*num_input_images, num_ch_enc[0], 7, 2, 3)
-        self.conv1 = nn.Sequential(
-            convbnrelu_Sparse(num_ch_enc[0], num_ch_enc[1], 3, 2, 1),
-            ConvBlock_Sparse(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu_Sparse(num_ch_enc[1], num_ch_enc[2], 3, 2, 1),
-            ConvBlock_Sparse(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu_Sparse(num_ch_enc[2], num_ch_enc[3], 3, 2, 1),
-            ConvBlock_Sparse(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu_Sparse(num_ch_enc[3], num_ch_enc[4], 3, 2, 1),
-            ConvBlock_Sparse(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-        B,C,H,W = input_image.shape
-        input_image_sp = spconv.SparseConvTensor.from_dense(input_image.reshape(B,H,W,C))
-        features = []
-        x = self.pre_conv(input_image_sp)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [f.dense() for f in features]
-        return features
-
-class DepthEncoder_Sub(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_Sub, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu_Sub(d_num*num_input_images, num_ch_enc[0], 7, 2, 3)
-        self.conv1 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[0], num_ch_enc[1], 3, 2, 1),
-            ConvBlock_Sub(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[1], num_ch_enc[2], 3, 2, 1),
-            ConvBlock_Sub(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[2], num_ch_enc[3], 3, 2, 1),
-            ConvBlock_Sub(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[3], num_ch_enc[4], 3, 2, 1),
-            ConvBlock_Sub(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-        B,C,H,W = input_image.shape
-        input_image_sp = spconv.SparseConvTensor.from_dense(input_image.reshape(B,H,W,C))
-        features = []
-        x = self.pre_conv(input_image_sp)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [f.dense() for f in features]
-        return features
-
-class DepthEncoder_MK(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_MK, self).__init__()
-
-        from MinkowskiEngine import MinkowskiConvolution, MinkowskiBatchNorm, MinkowskiReLU
-        from MinkowskiEngine.MinkowskiOps import to_sparse
-
-        def convbnrelu_MK(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-            return spconv.SparseSequential(
-                MinkowskiConvolution(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dimension=2,
-                                     bias=False),
-                MinkowskiBatchNorm(out_channels),
-                MinkowskiReLU(inplace=True)
-            )
-
-        self.to_sparse = to_sparse
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu_MK(d_num*num_input_images, num_ch_enc[0], 7, 2, 3)
-        self.conv1 = nn.Sequential(
-            convbnrelu_MK(num_ch_enc[0], num_ch_enc[1], 3, 2, 1),
-            ConvBlock_MK(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu_MK(num_ch_enc[1], num_ch_enc[2], 3, 2, 1),
-            ConvBlock_MK(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu_MK(num_ch_enc[2], num_ch_enc[3], 3, 2, 1),
-            ConvBlock_MK(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu_MK(num_ch_enc[3], num_ch_enc[4], 3, 2, 1),
-            ConvBlock_MK(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-        B,C,H,W = input_image.shape
-        org_HW = input_image.shape[2:]
-        HWs = [torch.Size([B,C]+(torch.tensor(org_HW, dtype=torch.float32)//(2**i)).int().tolist()) for i in range(1,6)]
-        input_image_sp = self.to_sparse(input_image)
-        features = []
-        x = self.pre_conv(input_image_sp)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        # shapes = []
-
-        features = [f.dense(shape=HWs[i])[0] for i,f in enumerate(features)]
-        return features
-
-
-class DepthEncoder_4(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_4, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
-        self.conv1 = nn.Sequential(
-            convbnrelu(num_ch_enc[0], num_ch_enc[1], 1, 1, 0),
-            ConvBlock1x1(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu(num_ch_enc[1], num_ch_enc[2], 1, 1, 0),
-            ConvBlock1x1(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu(num_ch_enc[2], num_ch_enc[3], 1, 1, 0),
-            ConvBlock1x1(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu(num_ch_enc[3], num_ch_enc[4], 1, 1, 0),
-            ConvBlock1x1(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-
-        B, C, H, W = input_image.shape
-        org_HW = input_image.shape[2:]
-        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
-        low_tof = F.interpolate(input_image, (8, 8))
-        features = []
-        x = self.pre_conv(low_tof)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
-        return features
-
-
-class DepthEncoder_5(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_5, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
-        self.conv1 = nn.Sequential(
-            convbnrelu(num_ch_enc[0], num_ch_enc[1], 1, 1, 0),
-            ConvBlock(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu(num_ch_enc[1], num_ch_enc[2], 1, 1, 0),
-            ConvBlock(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu(num_ch_enc[2], num_ch_enc[3], 1, 1, 0),
-            ConvBlock(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu(num_ch_enc[3], num_ch_enc[4], 1, 1, 0),
-            ConvBlock(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-
-        B, C, H, W = input_image.shape
-        org_HW = input_image.shape[2:]
-        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
-        low_tof = F.interpolate(input_image, (8, 8))
-        features = []
-        x = self.pre_conv(low_tof)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
-        return features
 
 class DepthEncoder_6(nn.Module):
     def __init__(self,num_ch_enc,d_num,num_input_images):
@@ -483,48 +243,6 @@ class DepthEncoder_7(nn.Module):
         return features
 
 
-class DepthEncoder_8(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_8, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu_Sub(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
-        self.conv1 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[0], num_ch_enc[1], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[1], num_ch_enc[2], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[2], num_ch_enc[3], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[3], num_ch_enc[4], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-
-        B, C, H, W = input_image.shape
-        org_HW = input_image.shape[2:]
-        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
-        low_tof = F.interpolate(input_image, (8, 8))
-        low_tof = F.interpolate(low_tof, (9, 12))
-        b,c,h,w = low_tof.shape
-        low_tof_sp = spconv.SparseConvTensor.from_dense(low_tof.reshape(b, h, w, c))
-        features = []
-        x = self.pre_conv(low_tof_sp)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [F.interpolate(f.dense(), HWs[i]) for i, f in enumerate(features)]
-        return features
 
 
 
@@ -543,8 +261,6 @@ class RGBD_Encoder(nn.Module):
             d_num = 1
         if args.encoder_type==0:
             self.depth_encoder = DepthEncoder(self.num_ch_enc, d_num,num_input_images)
-        elif args.encoder_type==2:
-            self.depth_encoder = DepthEncoder_Sub(self.num_ch_enc, d_num,num_input_images)
         else:
             functions = {name: obj for name, obj in globals().items() if callable(obj) and obj.__module__ == __name__}
             self.depth_encoder = functions["DepthEncoder_{}".format(args.encoder_type)](self.num_ch_enc, d_num,num_input_images)

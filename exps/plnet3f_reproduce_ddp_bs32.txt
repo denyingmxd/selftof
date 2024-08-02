@@ -1,7 +1,0 @@
---data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
---model_name plnet3f_reproduce_ddp_bs32
---frame_ids 0 -2 2
---batch_size 32
---num_workers 12
---distributed
---load_weights_root /data/laiyan/codes/PLNet/tmp/plnet3f_reproduce_ddp_bs32/models/

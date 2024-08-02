@@ -210,26 +210,7 @@ def evaluate(opt):
             hist_data = np.concatenate(hist_data)
             tof_mask = np.concatenate(tof_mask)
 
-    # else:
-    #     filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
-    #     dataset = datasets.NYUDataset(opt.data_path, filenames, self.opt.height, self.opt.width,
-    #                                   [0], 1, is_test=True, return_plane=True, num_plane_keysets=0,
-    #                                   return_line=True, num_line_keysets=0)
-    #
-    #     dataloader = DataLoader(dataset, opt.batch_size, shuffle=False, num_workers=opt.num_workers,
-    #                             pin_memory=True, drop_last=False)
-    #
-    #     gt_depths = []
-    #     planes = []
-    #     lines = []
-    #     for data in dataloader:
-    #         gt_depth = data["depth_gt"][:, 0].numpy()
-    #         gt_depths.append(gt_depth)
-    #     gt_depths = np.concatenate(gt_depths)
-    #
-    #     # Load predictions from file
-    #     print("-> Loading predictions from {}".format(opt.ext_disp_to_eval))
-    #     pred_disps = np.load(opt.ext_disp_to_eval)
+
 
     if opt.save_pred_disps:
         output_path = os.path.join(
@@ -242,7 +223,8 @@ def evaluate(opt):
         quit()
 
     print("-> Evaluating")
-    print("   Mono evaluation - using median scaling")
+    if not opt.disable_median_eval:
+        print("   Mono evaluation - using median scaling")
 
     errors = []
     ratios = []
@@ -256,49 +238,6 @@ def evaluate(opt):
         pred_disp = pred_disps[i]
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
-
-        if opt.tof_median_scaling:
-            H, W = pred_depth.shape
-            n = int(math.sqrt(hist_data.shape[1]))
-            hist = hist_data[i]
-            rect = rect_data[i]
-            mm= rect_mask[i]
-            aa, bb, cc, dd = int(rect[0, 0]), int(rect[0, 1]), int(rect[-1, 2]), int(rect[-1, 3])
-            p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
-            aa,bb,cc,dd = 0,0,H,W
-            p1, p2 = torch.div(cc - aa, n, rounding_mode='floor'), torch.div(dd - bb, n, rounding_mode='floor')
-
-            # pred_depth *= np.median(hist[:, 0]) / np.median(pred_depth)
-
-            cropped_output_depth0 = pred_depth[aa:cc, bb:dd]
-
-            folded_output_depth0 = scale_zone_depth_np(cropped_output_depth0, hist, p1, p2, n, n,n,pp=1,case='median_mul')
-            # pred_depth = folded_output_depth0
-
-            # folded_output_depth0 *= (hist[:, 0].reshape(-1,1,1) / np.median(folded_output_depth0, axis=(1, 2)).reshape(-1,1,1))
-
-            # xxx = [scale_zone_depth_np(cropped_output_depth0, hist, p1, p2, n, n, n, pp=pp,case='median_mul') for pp in [1,2,4,8]]
-            # xxx = np.stack(xxx).mean(0)
-            # pred_depth = xxx
-        #
-        # if True:
-            # depth_map_lr = hist_data[i][:,0].reshape(n,n)
-            # depth_map_upscaled_init = cv2.resize(depth_map_lr, (384, 288), interpolation=cv2.INTER_LINEAR)
-            # depth_map_upscaled_init = pred_depth
-            # rgb_hr = colors[0].transpose(1,2,0).astype(np.float32)
-            # rgb_hr = cv2.resize(rgb_hr, (gt_width, gt_height), interpolation=cv2.INTER_LINEAR)
-            # # Apply the guided filter
-            # # Note: Experiment with the radius and eps values to get the best results for your specific scenario
-            # radius = 15  # Radius of the guided filter
-            # eps = 0.01  # Regularization parameter of the guided filter (a larger value smoothes more)
-            #
-            # depth_map_upscaled_init = cv2.ximgproc.guidedFilter(guide=rgb_hr, src=depth_map_upscaled_init,
-            #                                                       radius=radius, eps=eps, dDepth=-1)
-            # depth_map_upscaled = cv2.resize(depth_map_upscaled_init, (gt_width, gt_height),interpolation=cv2.INTER_LINEAR)
-            # pred_depth = depth_map_upscaled
-
-
-
 
         mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
@@ -353,12 +292,9 @@ def evaluate(opt):
             rgb_image = rgb_image.resize((gt_width, gt_height), Image.ANTIALIAS)
 
             cap_depth = np.percentile(gt_depth, 95)
-            cap_pred_depth = np.percentile(pred_depth, 95)
             pred_depth_image = colorize(torch.from_numpy(pred_depth*ratio).unsqueeze(0), vmin=0.0, vmax=cap_depth, cmap='viridis')
             pred_depth_image = Image.fromarray(pred_depth_image)
 
-            # pred_depth_image_self_norm = colorize(torch.from_numpy(pred_depth*ratio).unsqueeze(0), vmin=0.0, vmax=cap_pred_depth, cmap='viridis')
-            # pred_depth_image_self_norm = Image.fromarray(pred_depth_image_self_norm)
 
             gt_depth_image = colorize(torch.from_numpy(gt_depth).unsqueeze(0), vmin=0.0, vmax=cap_depth, cmap='viridis')
             gt_depth_image = Image.fromarray(gt_depth_image)
@@ -367,10 +303,6 @@ def evaluate(opt):
             error_image = colorize(torch.from_numpy(error_image).unsqueeze(0), vmin=0.0, vmax=1.2, cmap='jet')
             error_image = Image.fromarray(error_image)
 
-            # pixelwise_ratio = gt_depth/(pred_depth*ratio)
-            # pixelwise_ratio = colorize(torch.from_numpy(pixelwise_ratio).unsqueeze(0), vmin=0.0, vmax=2, cmap='viridis')
-            # pixelwise_ratio = Image.fromarray(pixelwise_ratio)
-
             impath = filenames[i].split(' ')[-1].split('.')[0]
             if not os.path.exists(os.path.join(opt.load_weights_folder, opt.model_name)):
                 os.makedirs(os.path.join(opt.load_weights_folder, opt.model_name))
@@ -378,12 +310,6 @@ def evaluate(opt):
             pred_depth_image.save(os.path.join(opt.load_weights_folder,opt.model_name , f"{impath}_pred_depth.jpg"))
             gt_depth_image.save(os.path.join(opt.load_weights_folder,opt.model_name , f"{impath}_gt_depth.jpg"))
             error_image.save(os.path.join(opt.load_weights_folder, opt.model_name, f"{impath}_error.jpg"))
-            # pred_depth_image_self_norm.save(os.path.join(opt.load_weights_folder, opt.model_name, f"{impath}_pred_depth_self_norm.jpg"))
-            # pixelwise_ratio.save(os.path.join(opt.load_weights_folder, opt.model_name, f"{impath}_pixelwise_ratio.jpg"))
-            # np.savez_compressed(os.path.join(opt.load_weights_folder, opt.model_name, "pred", f"{impath}_pred_depth.npz"),pred_depth*ratio)
-            # np.savez_compressed(os.path.join(opt.load_weights_folder, opt.model_name, "pred", f"{impath}_pred_depth.npz"),pred_depth*ratio)
-
-
 
 
     mean_errors = np.array(errors).mean(0)

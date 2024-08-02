@@ -255,7 +255,6 @@ class Trainer_DDP:
         full_times = []
         old_time=time.time()
         op_times = []
-        # for batch_idx, inputs in enumerate(self.train_loader):
         for batch_idx, inputs in tqdm.tqdm(enumerate(self.train_loader),
                                                  desc=f"Epoch: {self.epoch}/{self.opt.num_epochs}. Loop: Train",
                                                  total=len(self.train_loader)) if self.opt.should_log \
@@ -386,47 +385,6 @@ class Trainer_DDP:
 
         return outputs
 
-    def val(self):
-        """Validate the model on the whole validation set
-        """
-        run_step = 0
-        losses_sum = {"loss": 0.0}
-        losses_avg = {"loss": 0.0}
-
-        for s in self.opt.scales:
-            losses_sum["loss/" + str(s)] = 0.0
-            losses_avg["loss/" + str(s)] = 0.0
-            losses_sum["smooth_loss/" + str(s)] = 0.0
-            losses_avg["smooth_loss/" + str(s)] = 0.0
-            if not self.opt.disable_plane_regularization:
-                losses_sum["plane_loss/" + str(s)] = 0.0
-                losses_avg["plane_loss/" + str(s)] = 0.0
-            if not self.opt.disable_line_regularization:
-                losses_sum["line_loss/" + str(s)] = 0.0
-                losses_avg["line_loss/" + str(s)] = 0.0
-
-        for name in self.depth_metric_names:
-            losses_sum[name] = 0.0
-            losses_avg[name] = 0.0
-
-        for batch_idx, inputs in enumerate(self.val_loader):
-            run_step += 1
-            with torch.no_grad():
-                outputs, losses = self.process_batch(inputs)
-
-                if "depth_gt" in inputs:
-                    self.compute_depth_losses(inputs, outputs, losses)
-                for l, v in losses.items():
-                    losses_sum[l] += v
-
-        for l, v in losses_sum.items():
-            losses_avg[l] = losses_sum[l] / run_step
-
-        self.log("val", inputs, outputs, losses_avg)
-
-        del inputs, outputs, losses, losses_sum, losses_avg
-
-        self.set_train()
 
     def generate_images_pred(self, inputs, outputs):
         """Generate the warped (reprojected) color images for a minibatch.
@@ -547,38 +505,6 @@ class Trainer_DDP:
                 losses["std_loss/{}".format(scale)] = std_loss
                 losses["sl_loss/{}".format(scale)] = sl_loss
 
-            if self.opt.zone_boundary_smoothness_weight > 0:
-                mean_disp = disp.mean(2, True).mean(3, True)
-                norm_disp = disp / (mean_disp + 1e-7)
-
-                smooth_loss = get_zone_smooth_loss(norm_disp, color, inputs, self.opt)
-                loss += self.opt.zone_boundary_smoothness_weight / (2 ** scale) * smooth_loss
-                losses["zone_boundary_smoothness_loss/{}".format(scale)] = smooth_loss
-
-            if self.opt.smoothness_scale_weight > 0  and ('scale_map', scale) in outputs.keys():
-                scale_map = outputs[('scale_map', scale)]
-                mean_scale = scale_map.mean(2, True).mean(3, True)
-                norm_scale_map = scale_map / (mean_scale + 1e-7)
-                smooth_scale_loss = get_smooth_loss(norm_scale_map, color)
-                loss += self.opt.smoothness_scale_weight / (2 ** scale) * smooth_scale_loss
-                losses["smoothness_scale_loss/{}".format(scale)] = smooth_scale_loss
-
-            if self.opt.smoothness_scale_zone_boundary_weight>0 and ('scale_map', scale) in outputs.keys():
-                scale_map = outputs[('scale_map', scale)]
-                mean_scale = scale_map.mean(2, True).mean(3, True)
-                norm_scale_map = scale_map / (mean_scale + 1e-7)
-                smooth_scale_loss = get_zone_smooth_loss(norm_scale_map, color, inputs, self.opt)
-                loss += self.opt.smoothness_scale_zone_boundary_weight / (2 ** scale) * smooth_scale_loss
-                losses["smoothness_scale_zone_boundary_loss/{}".format(scale)] = smooth_scale_loss
-
-            if self.opt.reg_scale_map_weight > 0 and ('scale_map', scale) in outputs.keys():
-                scale_map = outputs[('scale_map', scale)]
-                mean_scale = scale_map.mean(2, True).mean(3, True)
-                norm_scale_map = scale_map / (mean_scale + 1e-7)
-                reg_scale_map_loss = (norm_scale_map-mean_scale).abs().mean()
-                loss += self.opt.reg_scale_map_weight * reg_scale_map_loss
-                losses["reg_scale_map_loss/{}".format(scale)] = reg_scale_map_loss
-
 
             losses["loss/{}".format(scale)] = loss
             total_loss += loss
@@ -681,9 +607,7 @@ class Trainer_DDP:
                             "reprojection_losses_{}_{}/{}".format(frame_id, s, j),
                             outputs[("reprojection_losses", frame_id, s)][j].data, self.step)
                         if self.opt.sparse_d_type == 'tof':
-                            writer.add_image(
-                                "color_tof_pred_{}_{}/{}".format(frame_id, s, j),
-                                outputs[("color_tof", frame_id, s)][j].data, self.step)
+
                             writer.add_image(
                                 "reprojection_losses_tof_{}_{}/{}".format(frame_id, s, j),
                                 outputs[("reprojection_losses_tof", frame_id, s)][j].data*inputs[('additional',0)]['my_mask'][j].data, self.step)
@@ -708,14 +632,6 @@ class Trainer_DDP:
                         normalize_image(tof_mean), self.step)
 
 
-                if self.opt.load_seg:
-                    writer.add_image(
-                        "pred_seg_{}/{}".format(s, j),
-                        inputs[('seg',0,0)][j], self.step)
-                    # writer.add_image(
-                    #     "pred_tof_seg_{}/{}".format(s, j),
-                    #     outputs[('valid_area',0)][j], self.step)
-
                 if  ('valid_area',0) in outputs.keys():
                     writer.add_image(
                         "pred_tof_seg_{}/{}".format(s, j),
@@ -725,16 +641,6 @@ class Trainer_DDP:
                     writer.add_image(
                         "scale_map_{}/{}".format(s, j),
                         outputs[('scale_map',0)][j], self.step)
-
-                if ('flow',0) in outputs.keys():
-                    writer.add_image(
-                        "flow_{}/{}".format(s, j),
-                        torch.from_numpy(flow_to_image(outputs[('flow',0)][j].permute(1,2,0).detach().cpu().numpy())).permute(2,0,1), self.step)
-
-                if ('con_weight_map',0) in outputs.keys():
-                    writer.add_image(
-                        "con_weight_map_{}/{}".format(s, j),
-                        outputs[('con_weight_map',0)][j], self.step)
 
 
                 if ('valid_con_mask',0) in outputs.keys():
@@ -746,15 +652,6 @@ class Trainer_DDP:
                     writer.add_image(
                         "ls_weight_map_{}/{}".format(s, j),
                         outputs[('ls_weight_map',0)][j], self.step)
-
-                if ('gaussian_mask',0) in outputs.keys():
-                    writer.add_image(
-                        "gaussian_mask_{}/{}".format(s, j),
-                        outputs[('gaussian_mask',0)][j], self.step)
-                if ('sl_loss_full',0) in outputs.keys():
-                    writer.add_image(
-                        "sl_loss_full_{}/{}".format(s, j),
-                        outputs[('sl_loss_full',0)][j], self.step)
 
                 xx = inputs["depth_gt"][j]
                 yy =  torch.clamp(F.interpolate(

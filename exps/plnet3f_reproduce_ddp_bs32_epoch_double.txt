@@ -1,8 +1,0 @@
---data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
---model_name plnet3f_reproduce_ddp_bs32_epoch_double
---frame_ids 0 -2 2
---batch_size 32
---num_workers 12
---distributed
---num_epochs 40
---scheduler_step_size 30

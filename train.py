@@ -26,7 +26,7 @@ assert args.model_name in sys.argv[1]
 
 if __name__ == "__main__":
     if args.distributed:
-        from trainer_ddp import Trainer_DDP, train_ddp
+        from trainer_ddp import train_ddp
         import torch.multiprocessing as mp
         # args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -53,6 +53,4 @@ if __name__ == "__main__":
             mp.spawn(train_ddp, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
     else:
-        from trainer import Trainer
-        trainer = Trainer(args)
-        trainer.train()
+        raise NotImplementedError("Only DistributedDataParallel is supported.")

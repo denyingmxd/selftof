@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="79b77c0a-a914-4d24-88e3-6af4abc5ffa0" name="selftof">
+        <fileTransfer rootFolder="/data/laiyan" accessType="SFTP" host="10.26.10.102" port="22" sshConfigId="89f205ba-0db8-406d-ae5e-a142e50aa8a4" sshConfig="laiyan@10.26.10.102:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
