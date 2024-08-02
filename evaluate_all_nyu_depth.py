@@ -19,6 +19,7 @@ import math
 from einops import rearrange
 from scipy.optimize import curve_fit
 from layers import scale_zone_depth_np
+import torch.nn.functional as F
 
 import  matplotlib.pyplot as plt
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
@@ -147,6 +148,7 @@ def evaluate(opt):
         rect_data = []
         rect_mask = []
         hist_data = []
+        tof_mask = []
         print("-> Computing predictions with size {}x{}".format(encoder_dict['width'], encoder_dict['height']))
 
         with torch.no_grad():
@@ -169,6 +171,12 @@ def evaluate(opt):
                     rect_data.append(data[('additional',0)]['rect_data'])
                     rect_mask.append(data[('additional',0)]['mask'])
                     hist_data.append(data[('additional',0)]['hist_data'])
+                    tof_mask_full = F.interpolate(data[('additional',0)]['tof_mask'].float(), size=gt_depth.shape[1:], mode='nearest').bool()
+                    # folder, frame_index = filenames[idx].split()
+                    # tof_mask_full = np.load(os.path.join(opt.data_path, folder, "{:05d}".format(int(frame_index)) + "_fixed_mask_drop_{}.npz").format(str(0.2)))['fixed_mask']
+                    # tof_mask_full = torch.from_numpy(tof_mask_full.reshape(8,8)).float()
+                    # tof_mask_full = F.interpolate(tof_mask_full.unsqueeze(0).unsqueeze(0), size=gt_depth.shape[1:], mode='nearest').bool()
+                    tof_mask.append(tof_mask_full)
                 if opt.post_process:
                     # Post-processed results require each image to have two forward passes
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
@@ -200,6 +208,7 @@ def evaluate(opt):
             rect_data = np.concatenate(rect_data)
             rect_mask = np.concatenate(rect_mask)
             hist_data = np.concatenate(hist_data)
+            tof_mask = np.concatenate(tof_mask)
 
     # else:
     #     filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
@@ -292,6 +301,14 @@ def evaluate(opt):
 
 
         mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
+
+        tof_mask_local = tof_mask[i][0]
+        if opt.eval_in_zone:
+            mask = np.logical_and(mask, tof_mask_local)
+        elif opt.eval_out_zone:
+            mask = np.logical_and(mask, ~tof_mask_local)
+        else:
+            pass
 
         crop_mask = np.zeros(mask.shape)
         crop_mask[dataset.default_crop[2]:dataset.default_crop[3], \
@@ -407,14 +424,19 @@ if __name__ == "__main__":
         result = [i]
         result.extend(evaluate(options))
         ws.append(result)
-        # break
+
     if options.disable_median_scaling:
         ext='no_median'
     else:
         ext='median'
     ranges=""
     if options.eval_min_depth !=0.01 or options.eval_max_depth !=10:
-        ranges = "_{}_{}".format(options.eval_min_depth,options.eval_max_depth)
+        ranges += "_{}_{}".format(options.eval_min_depth,options.eval_max_depth)
+    if options.eval_in_zone:
+        ranges += "_in_zone"
+    elif options.eval_out_zone:
+        ranges += "_out_zone"
+    assert options.eval_in_zone + options.eval_out_zone <=1
     if options.vis_epoch is not None:
         wb.save(os.path.join(options.load_weights_root, "evaluation_{}_{}{}.xlsx".format(options.vis_epoch,ext,ranges)))
     else:

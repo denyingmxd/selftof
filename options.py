@@ -264,6 +264,8 @@ class MonodepthOptions:
         self.parser.add_argument("--eval_max_depth",default=10.0,type=float)
         self.parser.add_argument("--eval_min_depth",default=0.01,type=float)
         self.parser.add_argument("--detach_scale",action="store_true")
+        self.parser.add_argument("--eval_in_zone",action="store_true")
+        self.parser.add_argument("--eval_out_zone",action="store_true")
         self.parser.add_argument("--encoder_type",default=0,type=int)
         self.parser.add_argument("--conv_block_type",default=0,type=int)
         self.parser.add_argument("--addition_type",default=0,type=int)
