@@ -15,7 +15,7 @@ import torch.utils.model_zoo as model_zoo
 from layers import ConvBlock,ConvBlock_Sub,ConvBlock_Sparse,ConvBlock_MK,ConvBlock1x1,ConvBlock_Sub1x1
 import torch.nn.functional as F
 import spconv.pytorch as spconv
-
+import layers
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
     Adapted from https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
@@ -259,9 +259,13 @@ class RGBD_Pose_Encoder(nn.Module):
         functions = {name: obj for name, obj in globals().items() if callable(obj) and obj.__module__ == __name__}
         self.depth_encoder = functions["DepthEncoder_{}".format(args.depth_encoder_type)](self.num_ch_enc, d_num,num_input_images)
 
-
-
         self.args = args
+
+
+        if args.addition_type>0:
+            addition_network = getattr(layers, "AdditionNetwork_{}".format(args.addition_type))
+            self.addition_network = addition_network([self.num_ch_enc[-1]],args,for_pose=True)
+
 
 
     def forward(self, rgb_image, inputs,indexes):
@@ -270,5 +274,9 @@ class RGBD_Pose_Encoder(nn.Module):
         depth_input = torch.cat([inputs[('tof_depth',i)] for i in indexes],dim=1)
         depth_features = self.depth_encoder(depth_input)
 
-        features = [rgb_features[i]+depth_features[i] for i in range(len(rgb_features))]
+        if self.args.addition_type>0:
+            features = self.addition_network([rgb_features[-1]], [depth_features[-1]], inputs)
+        else:
+            features = [rgb_features[-1]+depth_features[-1]]
         return features
+
