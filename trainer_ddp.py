@@ -100,13 +100,14 @@ class Trainer_DDP:
         self.parameters_to_train += list(self.models["depth"].parameters())
 
         if self.opt.rgbd_pose_encoder:
-            self.models["pose_encoder"] = networks.RGBD_Encoder(self.opt.num_layers,
+            self.models["pose_encoder"] = networks.RGBD_Pose_Encoder(self.opt.num_layers,
                                                                 self.opt.weights_init == "pretrained",
                                                                 num_input_images=self.num_pose_frames,args=self.opt)
         else:
             self.models["pose_encoder"] = networks.ResnetEncoder(self.opt.num_layers,
-                                                             self.opt.weights_init == "pretrained",
-                                                             num_input_images=self.num_pose_frames)
+                                                                 self.opt.weights_init == "pretrained",
+                                                                 num_input_images=self.num_pose_frames)
+
         self.models["pose_encoder"] = nn.SyncBatchNorm.convert_sync_batchnorm(self.models["pose_encoder"])
         self.models["pose_encoder"].to(self.device)
         self.models["pose_encoder"] = torch.nn.parallel.DistributedDataParallel(self.models["pose_encoder"], device_ids=[self.opt.gpu],
@@ -303,18 +304,18 @@ class Trainer_DDP:
 
         norm_pix_coords = [inputs[("norm_pix_coords", s)] for s in self.opt.scales]
 
-        features,rgb_features = self.models["encoder"](inputs["color_aug", 0, 0],inputs)
-        outputs = self.models["depth"](features, norm_pix_coords,inputs,self.opt,rgb_features)
+        rgb_features,tof_features = self.models["encoder"](inputs["color_aug", 0, 0],inputs)
+        outputs = self.models["depth"](rgb_features, norm_pix_coords,inputs,self.opt,tof_features)
 
 
-        outputs.update(self.predict_poses(inputs,outputs))
+        outputs.update(self.predict_poses(inputs))
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
 
         return outputs, losses
 
-    def predict_poses(self, inputs,old_outputs):
+    def predict_poses(self, inputs):
         """Predict poses between input frames for monocular sequences.
         """
         outputs = {}
@@ -331,8 +332,11 @@ class Trainer_DDP:
 
             for i in range(half_source_frames):
                 pose_inputs = [pose_feats[negative_half[i + 1]], pose_feats[negative_half[i]]]
-                pose_inputs = [self.models["pose_encoder"](torch.cat(pose_inputs, 1),inputs,index=negative_half[i+1])[0]]
-                axisangle, translation = self.models["pose"](pose_inputs,self.opt,old_outputs)
+                if self.opt.rgbd_pose_encoder:
+                    pose_inputs = [self.models["pose_encoder"](torch.cat(pose_inputs, 1),inputs,[negative_half[i + 1],negative_half[i]])]
+                else:
+                    pose_inputs = [self.models["pose_encoder"](torch.cat(pose_inputs, 1))[0]]
+                axisangle, translation = self.models["pose"](pose_inputs)
 
                 outputs[("axisangle", negative_half[i + 1], negative_half[i])] = axisangle
                 outputs[("translation", negative_half[i + 1], negative_half[i])] = translation
@@ -352,8 +356,11 @@ class Trainer_DDP:
 
             for i in range(half_source_frames):
                 pose_inputs = [pose_feats[positive_half[i]], pose_feats[positive_half[i + 1]]]
-                pose_inputs =  [self.models["pose_encoder"](torch.cat(pose_inputs, 1),inputs,index=positive_half[i+1])[0]]
-                axisangle, translation = self.models["pose"](pose_inputs,self.opt,old_outputs)
+                if self.opt.rgbd_pose_encoder:
+                    pose_inputs = [self.models["pose_encoder"](torch.cat(pose_inputs, 1), inputs, [positive_half[i + 1], positive_half[i]])]
+                else:
+                    pose_inputs = [self.models["pose_encoder"](torch.cat(pose_inputs, 1))[0]]
+                axisangle, translation = self.models["pose"](pose_inputs)
 
                 outputs[("axisangle", positive_half[i], positive_half[i + 1])] = axisangle
                 outputs[("translation", positive_half[i], positive_half[i + 1])] = translation
@@ -496,14 +503,14 @@ class Trainer_DDP:
                 loss += self.opt.line_weight * line_loss
                 losses["line_loss/{}".format(scale)] = line_loss
 
-            if self.opt.sparse_depth_loss_weight>0:
-                mean_loss,std_loss,sparse_depth_loss, sl_loss = compute_sparse_depth_loss(inputs['additional',0]['tof_mean'], outputs[("depth", 0, scale)], inputs,outputs,self.opt)
+            if self.opt.sparse_depth_loss_weight>0 and 'tof' in self.opt.sparse_d_type:
+                mean_loss,std_loss,sparse_depth_loss = compute_sparse_depth_loss(inputs['additional',0]['tof_mean'], outputs[("depth", 0, scale)], inputs,outputs,self.opt)
                 loss += self.opt.sparse_depth_loss_weight * sparse_depth_loss
-                loss += self.opt.sl_loss_weight * sl_loss
+
                 losses["sparse_depth_loss/{}".format(scale)] = sparse_depth_loss
                 losses["mean_loss/{}".format(scale)] = mean_loss
                 losses["std_loss/{}".format(scale)] = std_loss
-                losses["sl_loss/{}".format(scale)] = sl_loss
+
 
 
             losses["loss/{}".format(scale)] = loss
@@ -591,6 +598,9 @@ class Trainer_DDP:
                         for abc, xxx in enumerate(rect_data[rect_mask == 1]):
                             a, b, c, d = xxx
                             draw.rectangle((b, a, d, c), outline=(255, 0, 0))
+                        for abc, xxx in enumerate(rect_data[rect_mask == 0]):
+                            a, b, c, d = xxx
+                            draw.rectangle((b, a, d, c), outline=(0, 0, 0))
                         rgb_image = np.array(rgb_image).transpose(2, 0, 1)
                         rgb_image = torch.from_numpy(rgb_image).float() / 255
 

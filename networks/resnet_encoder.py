@@ -87,7 +87,7 @@ class ResnetEncoder(nn.Module):
         if num_layers > 34:
             self.num_ch_enc[1:] *= 4
 
-    def forward(self, input_image,depth_image=None,index=None):
+    def forward(self, input_image,inputs=None):
         features = []
         x = (input_image - 0.45) / 0.225
         x = self.encoder.conv1(x)
@@ -98,8 +98,7 @@ class ResnetEncoder(nn.Module):
         features.append(self.encoder.layer3(features[-1])) #256, 18x24
         features.append(self.encoder.layer4(features[-1])) #512, 9x12
 
-        # return features,[torch.zeros_like(features[i]) for i in range(5)]
-        return features
+        return features,[torch.zeros_like(features[i]) for i in range(len(features))]
 
 def convbnrelu(in_channels, out_channels, kernel_size=3,stride=1, padding=1):
     return nn.Sequential(
@@ -121,89 +120,11 @@ def convbnrelu_Sub(in_channels, out_channels, kernel_size=3, stride=1, padding=1
 
 
 
-class DepthEncoder(nn.Module):
+
+
+class DepthEncoder_1(nn.Module):
     def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu(d_num*num_input_images, num_ch_enc[0], 7, 2, 3)
-        self.conv1 = nn.Sequential(
-            convbnrelu(num_ch_enc[0], num_ch_enc[1], 3, 2, 1),
-            ConvBlock(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu(num_ch_enc[1], num_ch_enc[2], 3, 2, 1),
-            ConvBlock(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu(num_ch_enc[2], num_ch_enc[3], 3, 2, 1),
-            ConvBlock(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu(num_ch_enc[3], num_ch_enc[4], 3, 2, 1),
-            ConvBlock(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-        features = []
-        x = self.pre_conv(input_image)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        return features
-
-
-
-
-class DepthEncoder_6(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_6, self).__init__()
-        self.num_ch_enc = num_ch_enc
-
-        self.pre_conv = convbnrelu_Sub(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
-        self.conv1 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[0], num_ch_enc[1], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[1], num_ch_enc[1])
-        )
-        self.conv2 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[1], num_ch_enc[2], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[2], num_ch_enc[2])
-        )
-        self.conv3 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[2], num_ch_enc[3], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[3], num_ch_enc[3])
-        )
-        self.conv4 = nn.Sequential(
-            convbnrelu_Sub(num_ch_enc[3], num_ch_enc[4], 1, 1, 0),
-            ConvBlock_Sub(num_ch_enc[4], num_ch_enc[4])
-        )
-
-
-    def forward(self, input_image):
-
-        B, C, H, W = input_image.shape
-        org_HW = input_image.shape[2:]
-        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
-        low_tof = F.interpolate(input_image, (8, 8))
-        b,c,h,w = low_tof.shape
-        low_tof_sp = spconv.SparseConvTensor.from_dense(low_tof.reshape(b, h, w, c))
-        features = []
-        x = self.pre_conv(low_tof_sp)
-        features.append(x)
-        features.append(self.conv1(features[-1]))
-        features.append(self.conv2(features[-1]))
-        features.append(self.conv3(features[-1]))
-        features.append(self.conv4(features[-1]))
-        features = [F.interpolate(f.dense(), HWs[i]) for i, f in enumerate(features)]
-        return features
-
-
-class DepthEncoder_7(nn.Module):
-    def __init__(self,num_ch_enc,d_num,num_input_images):
-        super(DepthEncoder_7, self).__init__()
+        super(DepthEncoder_1, self).__init__()
         self.num_ch_enc = num_ch_enc
 
         self.pre_conv = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
@@ -246,6 +167,52 @@ class DepthEncoder_7(nn.Module):
 
 
 
+class DepthEncoder_2(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_2, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.pre_conv = convbnrelu_Sub(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+        self.conv1 = nn.Sequential(
+            convbnrelu_Sub(num_ch_enc[0], num_ch_enc[1], 1, 1, 0),
+            ConvBlock_Sub(num_ch_enc[1], num_ch_enc[1])
+        )
+        self.conv2 = nn.Sequential(
+            convbnrelu_Sub(num_ch_enc[1], num_ch_enc[2], 1, 1, 0),
+            ConvBlock_Sub(num_ch_enc[2], num_ch_enc[2])
+        )
+        self.conv3 = nn.Sequential(
+            convbnrelu_Sub(num_ch_enc[2], num_ch_enc[3], 1, 1, 0),
+            ConvBlock_Sub(num_ch_enc[3], num_ch_enc[3])
+        )
+        self.conv4 = nn.Sequential(
+            convbnrelu_Sub(num_ch_enc[3], num_ch_enc[4], 1, 1, 0),
+            ConvBlock_Sub(num_ch_enc[4], num_ch_enc[4])
+        )
+
+
+    def forward(self, input_image):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        low_tof_sp = spconv.SparseConvTensor.from_dense(low_tof.reshape(b, h, w, c))
+        features = []
+        x = self.pre_conv(low_tof_sp)
+        features.append(x)
+        features.append(self.conv1(features[-1]))
+        features.append(self.conv2(features[-1]))
+        features.append(self.conv3(features[-1]))
+        features.append(self.conv4(features[-1]))
+        features = [F.interpolate(f.dense(), HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+
+
+
 
 
 class RGBD_Encoder(nn.Module):
@@ -259,24 +226,49 @@ class RGBD_Encoder(nn.Module):
             d_num = int(args.sparse_depth_input_type.split('_')[-1])
         else:
             d_num = 1
-        if args.encoder_type==0:
-            self.depth_encoder = DepthEncoder(self.num_ch_enc, d_num,num_input_images)
-        else:
-            functions = {name: obj for name, obj in globals().items() if callable(obj) and obj.__module__ == __name__}
-            self.depth_encoder = functions["DepthEncoder_{}".format(args.encoder_type)](self.num_ch_enc, d_num,num_input_images)
+
+        functions = {name: obj for name, obj in globals().items() if callable(obj) and obj.__module__ == __name__}
+        self.depth_encoder = functions["DepthEncoder_{}".format(args.depth_encoder_type)](self.num_ch_enc, d_num,num_input_images)
 
 
 
         self.args = args
 
 
-    def forward(self, rgb_image, inputs, index=0):
-        rgb_features = self.rgb_encoder(rgb_image)
-        if index==0:
-            depth_features = self.depth_encoder(inputs[('tof_depth',0)])
-        else:
-            depth_inputs = torch.cat([inputs[('tof_depth',0)],inputs[('tof_depth',index)]],1)
-            depth_features = self.depth_encoder(depth_inputs)
-        features =[rgb_features[i]+depth_features[i] for i in range(len(rgb_features))]
+    def forward(self, rgb_image, inputs):
+        rgb_features = self.rgb_encoder(rgb_image)[0]
 
-        return features,rgb_features
+        depth_features = self.depth_encoder(inputs[('tof_depth',0)])
+
+        return rgb_features,depth_features
+
+
+
+class RGBD_Pose_Encoder(nn.Module):
+    def __init__(self, num_layers, pretrained, num_input_images=1,args=None):
+        super(RGBD_Pose_Encoder, self).__init__()
+
+        self.num_ch_enc = np.array([64, 64, 128, 256, 512])
+
+        self.rgb_encoder = ResnetEncoder(num_layers, pretrained, num_input_images)
+        if 'multi' in args.sparse_depth_input_type:
+            d_num = int(args.sparse_depth_input_type.split('_')[-1])
+        else:
+            d_num = 1
+
+        functions = {name: obj for name, obj in globals().items() if callable(obj) and obj.__module__ == __name__}
+        self.depth_encoder = functions["DepthEncoder_{}".format(args.depth_encoder_type)](self.num_ch_enc, d_num,num_input_images)
+
+
+
+        self.args = args
+
+
+    def forward(self, rgb_image, inputs,indexes):
+        rgb_features = self.rgb_encoder(rgb_image)[0]
+
+        depth_input = torch.cat([inputs[('tof_depth',i)] for i in indexes],dim=1)
+        depth_features = self.depth_encoder(depth_input)
+
+        features = [rgb_features[i]+depth_features[i] for i in range(len(rgb_features))]
+        return features

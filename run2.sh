@@ -2,19 +2,18 @@
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 ###
 
-modelname="mono_drop_20_oracle_rgbd_pose_rgbd_enc_6_add_19_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8"
-#python train.py @./exps/$modelname.txt --port 16002
+modelname="mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3"
+python train.py @./exps/$modelname.txt --port 16002
 python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_in_zone
 python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_out_zone
-python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --vis_epoch 39 --eval_do_save
-python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling
+#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling
 #python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002
 
-#modelname="mono_drop_20_oracle_rgbd_pose_rgbd_enc_7_add_15_ep_40_sm_0.1_area_mean_area_L2_weighted_12_0.01_scale_depth_8"
-#python train.py @./exps/$modelname.txt --port 16002
-#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_in_zone
-#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_out_zone
-#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --vis_epoch 39 --eval_do_save
+modelname="mono_drop_0.4_rgbtof_tp_256_L2_2_0.01_scale_3"
+python train.py @./exps/$modelname.txt --port 16002
+python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_in_zone
+python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling --eval_out_zone
 #python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002 --disable_median_scaling
-##python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002
-#
+#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002
+#python evaluate_all_nyu_depth.py @./exps/$modelname.txt --port 16002
+

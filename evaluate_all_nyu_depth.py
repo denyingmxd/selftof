@@ -18,7 +18,7 @@ from PIL import Image, ImageFont, ImageDraw, ImageEnhance
 import math
 from einops import rearrange
 from scipy.optimize import curve_fit
-from layers import scale_zone_depth_np
+
 import torch.nn.functional as F
 
 import  matplotlib.pyplot as plt
@@ -183,8 +183,8 @@ def evaluate(opt):
                     norm_pix_coords = [torch.cat((pc, torch.flip(pc, [3])), 0) for pc in norm_pix_coords]
                     norm_pix_coords[0][norm_pix_coords[0].shape[0] // 2:, 0] *= -1
 
-                features,rgb_features = encoder(input_color,data)
-                output = depth_decoder(features, norm_pix_coords, data, opt, rgb_features)
+                rgb_features,tof_features = encoder(input_color,data)
+                output = depth_decoder(rgb_features, norm_pix_coords, data, opt, tof_features)
 
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
@@ -223,7 +223,7 @@ def evaluate(opt):
         quit()
 
     print("-> Evaluating")
-    if not opt.disable_median_eval:
+    if not opt.disable_median_scaling:
         print("   Mono evaluation - using median scaling")
 
     errors = []
@@ -241,17 +241,20 @@ def evaluate(opt):
 
         mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
-        tof_mask_local = tof_mask[i][0]
-        if opt.eval_in_zone:
-            mask = np.logical_and(mask, tof_mask_local)
-        elif opt.eval_out_zone:
-            mask = np.logical_and(mask, ~tof_mask_local)
+        if 'tof' in opt.sparse_d_type:
+            tof_mask_local = tof_mask[i][0]
+            if opt.eval_in_zone:
+                mask = np.logical_and(mask, tof_mask_local)
+            elif opt.eval_out_zone:
+                mask = np.logical_and(mask, ~tof_mask_local)
+            else:
+                pass
         else:
             pass
 
         crop_mask = np.zeros(mask.shape)
         crop_mask[dataset.default_crop[2]:dataset.default_crop[3], \
-        dataset.default_crop[0]:dataset.default_crop[1]] = 1
+                    dataset.default_crop[0]:dataset.default_crop[1]] = 1
         mask = np.logical_and(mask, crop_mask)
         if mask.sum()==0:
             continue

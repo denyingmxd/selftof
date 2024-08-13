@@ -99,9 +99,8 @@ class MonoDataset(data.Dataset):
         self.load_plane = return_plane and self.check_plane()
         self.load_line = return_line and self.check_line()
 
-        self.load_seg = opt.load_seg or opt.weighted_ls_type==13
 
-        if self.load_plane or self.load_line or self.load_seg:
+        if self.load_plane or self.load_line:
             self.plk_resize = {}
             self.num_plane_keysets = num_plane_keysets
             self.num_line_keysets = num_line_keysets
@@ -270,7 +269,7 @@ class MonoDataset(data.Dataset):
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
-            if 'tof' in self.opt.sparse_d_type:
+            if 'tof' in self.opt.sparse_d_type or True:
                 if self.opt.drop_rate>0:
                     if self.is_test:
                         drop_mask = np.load(os.path.join(self.data_path, folder, "{:05d}".format(frame_index) + "_fixed_mask_drop_{}.npz").format(str(self.opt.drop_rate)))['fixed_mask']
@@ -284,6 +283,18 @@ class MonoDataset(data.Dataset):
                 inputs[("tof_depth",0)] = tof_depth
                 inputs[("additional",0)] = additional
 
+            if self.opt.rgbd_pose_encoder:
+                rest_idxs = self.frame_idxs.copy()
+                rest_idxs.remove(0)
+                for xx in rest_idxs:
+                    depth_gt = self.get_depth(folder, frame_index + xx, side, do_flip)
+                    depth_gt = np.expand_dims(depth_gt, 0)
+                    depth_gt = torch.from_numpy(depth_gt.astype(np.float32))
+                    tof_depth, additional = self.get_tof_depth(depth_gt, drop_mask)
+                    inputs[("tof_depth", xx)] = tof_depth
+                    inputs[("additional", xx)] = additional
+
+
 
 
 
@@ -294,8 +305,6 @@ class MonoDataset(data.Dataset):
         if self.load_line:
             inputs[("line", 0, -1)] = self.get_line(folder, frame_index, side, do_flip)
 
-        if self.load_seg and self.is_train:
-            inputs[("seg", 0, -1)] = self.get_seg(folder, frame_index, side, do_flip)
 
         self.preprocess(inputs, color_aug)
 
@@ -310,9 +319,6 @@ class MonoDataset(data.Dataset):
 
         if self.load_line and not self.is_test:
             del inputs[("line", 0, -1)]
-
-        if self.load_seg and not self.is_test:
-            del inputs[("seg", 0, -1)]
 
         if "s" in self.frame_idxs:
             stereo_T = np.eye(4, dtype=np.float32)

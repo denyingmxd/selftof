@@ -111,19 +111,6 @@ class NYUDataset(MonoDataset):
 
         return depth_gt
 
-    def get_seg(self, folder, frame_index, side, do_flip):
-
-
-        seg_path = os.path.join(self.data_path, folder, str(frame_index) + "_segformer.npz")
-
-        seg_pred = np.load(seg_path)['arr_0']
-        seg_pred = seg_pred[self.edge_crop:480-self.edge_crop, self.edge_crop:640-self.edge_crop]
-
-
-        if do_flip:
-            seg_pred = np.fliplr(seg_pred)
-        seg_pred = Image.fromarray(seg_pred.astype(np.uint8))
-        return seg_pred
 
     def get_plane(self, folder, frame_index, side, do_flip):
         plane = pil.open(self.get_plane_path(folder, frame_index, side))

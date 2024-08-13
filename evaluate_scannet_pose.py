@@ -55,10 +55,8 @@ def prepare_model_for_test(opt):
     opt.num_pose_frames = 2 if opt.pose_model_input == "pairs" else opt.num_input_frames
 
     # pose_encoder = networks.ResnetEncoder(opt.num_layers, False, 2)
-    if opt.rgbd_pose_encoder:
-        pose_encoder = networks.RGBD_Encoder(opt.num_layers,False,num_input_images=opt.num_pose_frames, args=opt)
-    else:
-        pose_encoder = networks.ResnetEncoder(opt.num_layers,False,num_input_images=opt.num_pose_frames)
+
+    pose_encoder = networks.ResnetEncoder(opt.num_layers,False,num_input_images=opt.num_pose_frames)
 
     pose_decoder = networks.PoseDecoder(pose_encoder.num_ch_enc, 1, 1)
 

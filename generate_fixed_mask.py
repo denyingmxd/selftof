@@ -57,5 +57,5 @@ for i in tqdm.tqdm(range(len(files))):
     # print(fixed_mask.shape)
     # print(fixed_mask)
     np.savez(pp, fixed_mask=fixed_mask)
-    # print(pp)
-    # exit()
+    print(pp)
+    exit()

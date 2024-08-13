@@ -678,7 +678,12 @@ def compute_sparse_depth_loss(sparse_depth0, output_depth0,inputs,outputs,args):
         folded_output_depth0 = rearrange(cropped_output_depth0, 'b c (zn1 p1) (zn2 p2) -> b c (zn1 zn2) (p1 p2)',zn1=n, zn2=n, p1=p1, p2=p2).contiguous()
 
         valid_area_tensor = torch.ones((B,1,cc-aa,dd-bb),device=sparse_depth0.device)
-        if args.weighted_ls_type==12:
+        if args.weighted_ls_type==1:
+            valid_mask = torch.ones_like(hist_mask)
+            means = folded_output_depth0.mean([3]).squeeze(1)
+            stds = folded_output_depth0.std([3]).squeeze(1)
+
+        elif args.weighted_ls_type==2:
             if ('pixel_distributions',0) in outputs.keys():
                 weights_by_distance = outputs[('pixel_distributions',0)]
             else:
@@ -696,14 +701,8 @@ def compute_sparse_depth_loss(sparse_depth0, output_depth0,inputs,outputs,args):
 
             outputs[('ls_weight_map', 0)] = rearrange(weights_by_distance, 'b 1 (zn1 zn2) (p1 p2) -> b 1 (zn1 p1) (zn2 p2)', zn1=n, zn2=n, p1=p1, p2=p2)
 
-
         else:
-            valid_mask = torch.ones_like(hist_mask)
-            means = folded_output_depth0.mean([3]).squeeze(1)
-            stds = folded_output_depth0.std([3]).squeeze(1)
-
-
-
+            raise NotImplementedError
 
         if args.sparse_depth_loss_type=='area_L2':
             mean_loss = torch.square(means - hist_data[:, :, 0]) * hist_mask
@@ -726,18 +725,17 @@ def compute_sparse_depth_loss(sparse_depth0, output_depth0,inputs,outputs,args):
 
         outputs[('con_weight_map', 0)] = rearrange(weight_map, 'b (zn1 zn2) -> b 1 (zn1) (zn2)', zn1=n, zn2=n)
 
-        loss_sparse_depth = mean_loss + std_loss*args.std_weight
+        loss_sparse_depth = mean_loss + std_loss
         
 
 
     else:
-        mean_loss, std_loss, loss_sparse_depth, sl_loss = torch.tensor(0.0).to(output_depth0.device), \
-            torch.tensor(0.0).to(output_depth0.device), torch.tensor(0.0).to(output_depth0.device) \
-            , torch.tensor(0.0).to(output_depth0.device)
+        mean_loss, std_loss, loss_sparse_depth = torch.tensor(0.0).to(output_depth0.device), \
+            torch.tensor(0.0).to(output_depth0.device), torch.tensor(0.0).to(output_depth0.device)
 
 
 
-    return mean_loss, std_loss, loss_sparse_depth, sl_loss
+    return mean_loss, std_loss, loss_sparse_depth
 
 
 

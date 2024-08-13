@@ -1,21 +1,21 @@
 --data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
---model_name debug
+--model_name mono_rgbtof_256_L2_2_0.001_scale_3
+--load_weights_root /data/laiyan/codes/selftof/tmp/mono_rgbtof_256_L2_2_0.001_scale_3/models/
 --frame_ids 0 -2 2
---batch_size 4
---num_workers 1
+--batch_size 32
+--num_workers 12
 --height 256
 --width 256
---rgbd_encoder
---rgbd_pose_encoder
 --distributed
 --learning_rate 1e-4
 --num_epochs 40
 --scheduler_step_size 30
 --depth_repr disp
+--rgbd_encoder
 --sparse_d_type tof
 --sparse_depth_input_type area_mean
 --sparse_depth_loss_type area_L2
---sparse_depth_loss_weight 0.01
+--sparse_depth_loss_weight 0.001
 --disable_plane_smoothness
 --smoothness_weight 0.1
 --disable_plane_regularization
@@ -26,4 +26,4 @@
 --addition_type 0
 --weighted_ls_type 2
 --oracle
---drop_rate 0.4
+--drop_rate 0
