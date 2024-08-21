@@ -57,8 +57,8 @@ class DepthDecoder(nn.Module):
 
         for s in self.scales:
             self.convs[("dispconv", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
-        if args.addition_type>0:
-            addition_network = getattr(layers, "AdditionNetwork_{}".format(args.addition_type))
+        if args.depth_addition_type>0:
+            addition_network = getattr(layers, "AdditionNetwork_{}".format(args.depth_addition_type))
             self.addition_network = addition_network(num_ch_enc,args)
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
@@ -68,7 +68,7 @@ class DepthDecoder(nn.Module):
     def forward(self, rgb_features, norm_pix_coords, inputs, args,tof_features):
         #
         outputs = {}
-        if args.addition_type==0:
+        if args.depth_addition_type==0:
             input_features = [rgb_features[i]+tof_features[i] for i in range(len(rgb_features))]
         else:
             input_features = self.addition_network(rgb_features, tof_features, inputs)

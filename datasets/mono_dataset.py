@@ -218,6 +218,7 @@ class MonoDataset(data.Dataset):
         line = self.filenames[index].split()
         # line[-1] = '00272'
         # line[-1] = '00027'
+        # line[-1] = '00056'
         folder = line[0]
 
         if len(line) >= 2:

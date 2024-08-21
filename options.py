@@ -247,7 +247,8 @@ class MonodepthOptions:
         self.parser.add_argument("--eval_out_zone",action="store_true")
         self.parser.add_argument("--depth_encoder_type",default=0,type=int)
         self.parser.add_argument("--conv_block_type",default=0,type=int)
-        self.parser.add_argument("--addition_type",default=0,type=int)
+        self.parser.add_argument("--depth_addition_type",default=0,type=int)
+        self.parser.add_argument("--pose_addition_type",default=0,type=int)
         self.parser.add_argument("--drop_rate",default=0.0,type=float)
 
 

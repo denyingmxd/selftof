@@ -16,6 +16,9 @@ from layers import ConvBlock,ConvBlock_Sub,ConvBlock_Sparse,ConvBlock_MK,ConvBlo
 import torch.nn.functional as F
 import spconv.pytorch as spconv
 import layers
+from einops import rearrange
+from layers import positionalencoding1d
+from layers import DeformConv2d
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
     Adapted from https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
@@ -146,7 +149,7 @@ class DepthEncoder_1(nn.Module):
         )
 
 
-    def forward(self, input_image):
+    def forward(self, input_image,rgb_features=None):
 
         B, C, H, W = input_image.shape
         org_HW = input_image.shape[2:]
@@ -191,7 +194,7 @@ class DepthEncoder_2(nn.Module):
         )
 
 
-    def forward(self, input_image):
+    def forward(self, input_image,rgb_features=None):
 
         B, C, H, W = input_image.shape
         org_HW = input_image.shape[2:]
@@ -211,7 +214,529 @@ class DepthEncoder_2(nn.Module):
 
 
 
+class DepthEncoder_3(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_3, self).__init__()
+        self.num_ch_enc = num_ch_enc
 
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_feature, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten + pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2))
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+
+
+class DepthEncoder_4(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_4, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_feature, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten + pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2))/(embed_dim**0.5)
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+class DepthEncoder_5(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_5, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_feature, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten + pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2))
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+
+            features.append(depth_new+depth_feature)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+class DepthEncoder_6(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_6, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('combine_conv', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=3,stride=1,padding=1,bias=False)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            depth_new = self.convs[('combine_conv',i)](depth_feature+rgb_feature_down)
+
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+class DepthEncoder_7(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_7, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('combine_conv', i)] = nn.Conv2d(2*num_ch_enc[i],num_ch_enc[i],kernel_size=3,stride=1,padding=1,bias=False)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            depth_new = self.convs[('combine_conv',i)](torch.cat((rgb_feature_down,depth_feature),dim=1))
+
+
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+
+class DepthEncoder_8(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_8, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('combine_conv', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=3,stride=1,padding=1,bias=False)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            depth_new = self.convs[('combine_conv',i)](depth_feature+rgb_feature_down)
+
+
+            features.append(depth_new+depth_feature)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+class DepthEncoder_9(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_9, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        kernel_size = 3
+        padding = kernel_size // 2
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('offset_conv', i)] = nn.Conv2d(num_ch_enc[i], 2 * kernel_size * kernel_size,kernel_size=kernel_size, padding=padding, bias=True)
+            nn.init.constant_(self.convs[('offset_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('offset_conv', i)].bias, 0.)
+            self.convs[('deform_conv', i)] = DeformConv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=kernel_size,padding=padding, bias=True)
+            nn.init.constant_(self.convs[('deform_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('deform_conv', i)].bias, 0.)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            offset = self.convs[('offset_conv', i)](rgb_feature_down)
+            h, w = rgb_feature_down.shape[2:]
+            max_offset = max(h, w) / 4.
+            offset = offset.clamp(-max_offset, max_offset)
+            depth_new = self.convs[('deform_conv', i)](depth_feature, offset)
+
+            features.append(depth_new+depth_feature)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+class DepthEncoder_10(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_10, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        kernel_size = 3
+        padding = kernel_size // 2
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('offset_conv', i)] = nn.Conv2d(num_ch_enc[i], 2 * kernel_size * kernel_size,kernel_size=kernel_size, padding=padding, bias=True)
+            nn.init.constant_(self.convs[('offset_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('offset_conv', i)].bias, 0.)
+            self.convs[('deform_conv', i)] = DeformConv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=kernel_size,padding=padding, bias=True)
+            nn.init.constant_(self.convs[('deform_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('deform_conv', i)].bias, 0.)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            offset = self.convs[('offset_conv', i)](rgb_feature_down)
+            h, w = rgb_feature_down.shape[2:]
+            max_offset = max(h, w) / 4.
+            offset = offset.clamp(-max_offset, max_offset)
+            depth_new = self.convs[('deform_conv', i)](depth_feature, offset)
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
+
+
+class DepthEncoder_11(nn.Module):
+    def __init__(self,num_ch_enc,d_num,num_input_images):
+        super(DepthEncoder_11, self).__init__()
+        self.num_ch_enc = num_ch_enc
+
+        self.convs = {}
+        self.convs[('depth_conv',0)] = convbnrelu(d_num*num_input_images, num_ch_enc[0], 1, 1, 0)
+
+
+        for i in range(1,len(num_ch_enc)):
+            self.convs[('depth_conv',i)] = nn.Sequential(
+                convbnrelu(num_ch_enc[i-1], num_ch_enc[i], 1, 1, 0),
+                ConvBlock(num_ch_enc[i], num_ch_enc[i])
+            )
+
+        kernel_size = 5
+        padding = kernel_size // 2
+        for i in range(len(num_ch_enc)):
+            self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('offset_conv', i)] = nn.Conv2d(num_ch_enc[i], 2 * kernel_size * kernel_size,kernel_size=kernel_size, padding=padding, bias=True)
+            nn.init.constant_(self.convs[('offset_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('offset_conv', i)].bias, 0.)
+            self.convs[('deform_conv', i)] = DeformConv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=kernel_size,padding=padding, bias=True)
+            nn.init.constant_(self.convs[('deform_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('deform_conv', i)].bias, 0.)
+
+        self.net = nn.ModuleList(list(self.convs.values()))
+
+    def forward(self, input_image,rgb_features):
+
+        B, C, H, W = input_image.shape
+        org_HW = input_image.shape[2:]
+        HWs = [torch.Size((torch.tensor(org_HW, dtype=torch.float32) // (2 ** i)).int().tolist()) for i in range(1, 6)]
+        low_tof = F.interpolate(input_image, (8, 8))
+        b,c,h,w = low_tof.shape
+        features = []
+
+
+        for i in range(len(rgb_features)):
+            if i == 0:
+                x = low_tof
+            else:
+                x = features[-1]
+            depth_feature = self.convs[('depth_conv', i)](x)
+            rgb_feature = rgb_features[i]
+            rgb_feature_down = self.convs[('down', i)](rgb_feature)
+
+            offset = self.convs[('offset_conv', i)](rgb_feature_down)
+            h, w = rgb_feature_down.shape[2:]
+            max_offset = max(h, w) / 4.
+            offset = offset.clamp(-max_offset, max_offset)
+            depth_new = self.convs[('deform_conv', i)](depth_feature, offset)
+
+            features.append(depth_new)
+
+
+        features = [F.interpolate(f, HWs[i]) for i, f in enumerate(features)]
+        return features
 
 
 
@@ -238,7 +763,7 @@ class RGBD_Encoder(nn.Module):
     def forward(self, rgb_image, inputs):
         rgb_features = self.rgb_encoder(rgb_image)[0]
 
-        depth_features = self.depth_encoder(inputs[('tof_depth',0)])
+        depth_features = self.depth_encoder(inputs[('tof_depth',0)],rgb_features)
 
         return rgb_features,depth_features
 
@@ -262,8 +787,8 @@ class RGBD_Pose_Encoder(nn.Module):
         self.args = args
 
 
-        if args.addition_type>0:
-            addition_network = getattr(layers, "AdditionNetwork_{}".format(args.addition_type))
+        if args.pose_addition_type>0:
+            addition_network = getattr(layers, "AdditionNetwork_{}".format(args.pose_addition_type))
             self.addition_network = addition_network([self.num_ch_enc[-1]],args,for_pose=True)
 
 
@@ -272,9 +797,9 @@ class RGBD_Pose_Encoder(nn.Module):
         rgb_features = self.rgb_encoder(rgb_image)[0]
 
         depth_input = torch.cat([inputs[('tof_depth',i)] for i in indexes],dim=1)
-        depth_features = self.depth_encoder(depth_input)
+        depth_features = self.depth_encoder(depth_input,rgb_features)
 
-        if self.args.addition_type>0:
+        if self.args.pose_addition_type>0:
             features = self.addition_network([rgb_features[-1]], [depth_features[-1]], inputs)
         else:
             features = [rgb_features[-1]+depth_features[-1]]

@@ -1041,3 +1041,222 @@ class AdditionNetwork_4(nn.Module):
             final_features.append(depth_new+rgb_feature)
 
         return final_features
+
+
+
+
+class AdditionNetwork_5(nn.Module):
+    def __init__(self, num_ch_enc, args, for_pose=False):
+        super(AdditionNetwork_5, self).__init__()
+        self.num_ch_enc = num_ch_enc
+        #64,144,192
+        #64, 72,96
+        #128, 36, 48
+        #256, 18, 24
+        #512, 9, 12
+        self.args = args
+        self.convs = {}
+
+
+        kernel_size = 3
+        padding = kernel_size//2
+        for i in range(len(num_ch_enc)-1,-1,-1):
+            if for_pose:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=1, stride=1, padding=0, groups=num_ch_enc[i], bias=False)
+            else:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+
+            self.convs[('offset_conv', i)] = nn.Conv2d(num_ch_enc[i], 2 * kernel_size * kernel_size,kernel_size=kernel_size, padding=padding, bias=True)
+            nn.init.constant_(self.convs[('offset_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('offset_conv', i)].bias, 0.)
+            self.convs[('deform_conv', i)] = DeformConv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=kernel_size,padding=padding, bias=True)
+            nn.init.constant_(self.convs[('deform_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('deform_conv', i)].bias, 0.)
+
+        self.addition = nn.ModuleList(list(self.convs.values()))
+    def forward(self, rgb_features, depth_features,inputs):
+
+        final_features = []
+        for i in range(len(rgb_features)):
+            rgb_feature = rgb_features[i]
+            depth_feature = depth_features[i]
+
+            rgb_feature_down = self.convs[('down',i)](rgb_feature)
+            depth_features_low = F.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
+            resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> (b c) (h w)',c=1)
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten+pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2))/(embed_dim**0.5)
+            # rgb_affine[resized_tof_mask_flatten.unsqueeze(1).repeat(1, rgb_affine.shape[-1], 1) == 0.] = -1e9
+            mask = (resized_tof_mask_flatten.unsqueeze(2).repeat(1, 1, rgb_affine.shape[-1]) == 1.).to(rgb_feature.device)
+
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+            # rgb_affine = rgb_affine * (~mask).float()
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new_one = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+
+
+            offset = self.convs[('offset_conv', i)](rgb_feature_down)
+            h, w = rgb_feature_down.shape[2:]
+            max_offset = max(h, w) / 4.
+            offset = offset.clamp(-max_offset, max_offset)
+            depth_new_another = self.convs[('deform_conv', i)](depth_features_low, offset)
+
+            depth_new = depth_new_one+depth_new_another
+
+
+
+            depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
+            final_features.append(depth_new+rgb_feature+depth_feature)
+
+        return final_features
+
+
+class AdditionNetwork_6(nn.Module):
+    def __init__(self, num_ch_enc, args, for_pose=False):
+        super(AdditionNetwork_6, self).__init__()
+        self.num_ch_enc = num_ch_enc
+        #64,144,192
+        #64, 72,96
+        #128, 36, 48
+        #256, 18, 24
+        #512, 9, 12
+        self.args = args
+        self.convs = {}
+
+        for i in range(len(num_ch_enc)-1,-1,-1):
+            if for_pose:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=1, stride=1, padding=0, groups=num_ch_enc[i], bias=False)
+            else:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+        self.addition = nn.ModuleList(list(self.convs.values()))
+    def forward(self, rgb_features, depth_features,inputs):
+
+        final_features = []
+        for i in range(len(rgb_features)):
+            rgb_feature = rgb_features[i]
+            depth_feature = depth_features[i]
+
+            rgb_feature_down = self.convs[('down',i)](rgb_feature)
+            depth_features_low = F.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
+            resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> (b c) (h w)',c=1)
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten+pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2)) / (embed_dim/self.num_ch_enc[0])
+            # rgb_affine[resized_tof_mask_flatten.unsqueeze(1).repeat(1, rgb_affine.shape[-1], 1) == 0.] = -1e9
+            mask = (resized_tof_mask_flatten.unsqueeze(2).repeat(1, 1, rgb_affine.shape[-1]) == 1.).to(rgb_feature.device)
+
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+            # rgb_affine = rgb_affine * (~mask).float()
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+            depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
+            final_features.append(depth_new+rgb_feature+depth_feature)
+
+        return final_features
+
+
+class AdditionNetwork_7(nn.Module):
+    def __init__(self, num_ch_enc, args, for_pose=False):
+        super(AdditionNetwork_7, self).__init__()
+        self.num_ch_enc = num_ch_enc
+        #64,144,192
+        #64, 72,96
+        #128, 36, 48
+        #256, 18, 24
+        #512, 9, 12
+        self.args = args
+        self.convs = {}
+
+
+        kernel_size = 3
+        padding = kernel_size//2
+        for i in range(len(num_ch_enc)-1,-1,-1):
+            if for_pose:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=1, stride=1, padding=0, groups=num_ch_enc[i], bias=False)
+            else:
+                self.convs[('down', i)] = nn.Conv2d(num_ch_enc[i],num_ch_enc[i],kernel_size=2**(4-i),stride=2**(4-i),padding=0,groups=num_ch_enc[i],bias=False)
+            self.convs[('proj_1', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_2', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.convs[('proj_3', i)] = nn.Linear(num_ch_enc[i], num_ch_enc[i], bias=False)
+            self.register_buffer('pe_{}'.format(i), positionalencoding1d(num_ch_enc[i],64))
+
+
+            self.convs[('offset_conv', i)] = nn.Conv2d(num_ch_enc[i], 2 * kernel_size * kernel_size,kernel_size=kernel_size, padding=padding, bias=True)
+            nn.init.constant_(self.convs[('offset_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('offset_conv', i)].bias, 0.)
+            self.convs[('deform_conv', i)] = DeformConv2d(num_ch_enc[i], num_ch_enc[i], kernel_size=kernel_size,padding=padding, bias=True)
+            nn.init.constant_(self.convs[('deform_conv', i)].weight, 0.)
+            nn.init.constant_(self.convs[('deform_conv', i)].bias, 0.)
+
+        self.addition = nn.ModuleList(list(self.convs.values()))
+    def forward(self, rgb_features, depth_features,inputs):
+
+        final_features = []
+        for i in range(len(rgb_features)):
+            rgb_feature = rgb_features[i]
+            depth_feature = depth_features[i]
+
+            rgb_feature_down = self.convs[('down',i)](rgb_feature)
+            depth_features_low = F.interpolate(depth_feature, size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            low_tof_mask = inputs[('additional', 0)]['mask'].reshape(-1,self.args.zone_num,self.args.zone_num)#4,64
+            resized_tof_mask = torch.nn.functional.interpolate(low_tof_mask.unsqueeze(1).float(), size=(rgb_feature_down.shape[2], rgb_feature_down.shape[3]), mode='nearest')
+            resized_tof_mask_flatten = rearrange(resized_tof_mask, 'b c h w -> (b c) (h w)',c=1)
+            rgb_feature_down_flatten = rearrange(rgb_feature_down, 'b c h w -> b (h w) c')
+            depth_feature_low_flatten = rearrange(depth_features_low, 'b c h w -> b (h w) c')
+            pe = getattr(self, 'pe_{}'.format(i))
+            rgb_feature_down_flatten = rgb_feature_down_flatten+pe
+            rgb_feature_down_flatten_proj_1 = self.convs[('proj_1', i)](rgb_feature_down_flatten)
+            rgb_feature_down_flatten_proj_2 = self.convs[('proj_2', i)](rgb_feature_down_flatten)
+            depth_feature_low_flatten_proj = self.convs[('proj_3', i)](depth_feature_low_flatten)
+            embed_dim = rgb_feature_down_flatten_proj_1.shape[-1]
+            rgb_affine = torch.matmul(rgb_feature_down_flatten_proj_1, rgb_feature_down_flatten_proj_2.transpose(1, 2))
+            # rgb_affine[resized_tof_mask_flatten.unsqueeze(1).repeat(1, rgb_affine.shape[-1], 1) == 0.] = -1e9
+            mask = (resized_tof_mask_flatten.unsqueeze(2).repeat(1, 1, rgb_affine.shape[-1]) == 1.).to(rgb_feature.device)
+
+            rgb_affine = torch.nn.functional.softmax(rgb_affine, dim=2)
+            # rgb_affine = rgb_affine * (~mask).float()
+            depth_new_flatten = torch.matmul(rgb_affine, depth_feature_low_flatten_proj)
+            depth_new_one = rearrange(depth_new_flatten, 'b (h w) c -> b c h w', h=rgb_feature_down.shape[2], w=rgb_feature_down.shape[3])
+
+
+            offset = self.convs[('offset_conv', i)](rgb_feature_down)
+            h, w = rgb_feature_down.shape[2:]
+            max_offset = max(h, w) / 4.
+            offset = offset.clamp(-max_offset, max_offset)
+            depth_new_another = self.convs[('deform_conv', i)](depth_features_low, offset)
+
+            depth_new = depth_new_one+depth_new_another
+
+
+
+            depth_new = torch.nn.functional.interpolate(depth_new, size=(rgb_feature.shape[2], rgb_feature.shape[3]), mode='nearest')
+            final_features.append(depth_new+rgb_feature+depth_feature)
+
+        return final_features
