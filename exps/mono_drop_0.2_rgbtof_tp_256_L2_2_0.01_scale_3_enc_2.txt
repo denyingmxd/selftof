@@ -24,7 +24,8 @@
 --scale_by_tof_depth_type 3
 --depth_encoder_type 2
 --conv_block_type 0
---addition_type 0
+--depth_addition_type 0
+--pose_addition_type 0
 --weighted_ls_type 2
 --oracle
 --drop_rate 0.2

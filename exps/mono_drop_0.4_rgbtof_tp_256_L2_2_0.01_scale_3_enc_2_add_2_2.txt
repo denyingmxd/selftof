@@ -1,6 +1,6 @@
 --data_path /data/laiyan/codes/calibrated-backprojection-network/data/nyu_hl/data/
---model_name mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_2_2
---load_weights_root /data/laiyan/codes/selftof/tmp/mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_2_2/models/
+--model_name mono_drop_0.4_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_2_2
+--load_weights_root /data/laiyan/codes/selftof/tmp/mono_drop_0.4_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_2_2/models/
 --frame_ids 0 -2 2
 --batch_size 32
 --num_workers 12

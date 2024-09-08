@@ -149,6 +149,7 @@ def evaluate(opt):
         rect_mask = []
         hist_data = []
         tof_mask = []
+        tof_depths = np.zeros((len(filenames),1, encoder_dict['height'], encoder_dict['width']))
         print("-> Computing predictions with size {}x{}".format(encoder_dict['width'], encoder_dict['height']))
 
         with torch.no_grad():
@@ -171,6 +172,7 @@ def evaluate(opt):
                     rect_data.append(data[('additional',0)]['rect_data'])
                     rect_mask.append(data[('additional',0)]['mask'])
                     hist_data.append(data[('additional',0)]['hist_data'])
+                    tof_depths[idx] = data[('tof_depth',0)][0].detach().cpu().numpy()
                     tof_mask_full = F.interpolate(data[('additional',0)]['tof_mask'].float(), size=gt_depth.shape[1:], mode='nearest').bool()
                     # folder, frame_index = filenames[idx].split()
                     # tof_mask_full = np.load(os.path.join(opt.data_path, folder, "{:05d}".format(int(frame_index)) + "_fixed_mask_drop_{}.npz").format(str(0.2)))['fixed_mask']
@@ -189,9 +191,11 @@ def evaluate(opt):
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
 
-
+                #nearest neighbor
                 # pred_disp = 1./data[('tof_depth',0)][0].detach().cpu().numpy()
-                #GF
+                # # # #GF
+                # from some_codes.GF import upscale_depth
+                # pred_disp = upscale_depth(pred_disp[0], data[("color", 0, 0)][0].numpy().transpose(1,2,0))[0][None,::]
 
 
 
@@ -239,6 +243,8 @@ def evaluate(opt):
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
 
+
+
         mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
         if 'tof' in opt.sparse_d_type:
@@ -281,16 +287,16 @@ def evaluate(opt):
         if opt.vis_epoch is not None and opt.eval_do_save:
             rgb = colors[i]
             rgb = (rgb * 255).astype(np.uint8).transpose(1, 2, 0)
-            rgb_image =Image.fromarray(rgb)
+            rgb_image = Image.fromarray(rgb)
 
-            if 'tof' in opt.sparse_d_type:
-                draw = ImageDraw.Draw(rgb_image)
-                for j, xxx in enumerate(rect_data[i][rect_mask[i] == 1]):
-                    a, b, c, d = xxx
-                    draw.rectangle((b, a, d, c), outline=(255, 0, 0))
-                for j, xxx in enumerate(rect_data[i][rect_mask[i] == 0]):
-                    a, b, c, d = xxx
-                    draw.rectangle((b, a, d, c), outline=(0, 0, 0))
+            # if 'tof' in opt.sparse_d_type:
+            #     draw = ImageDraw.Draw(rgb_image)
+            #     for j, xxx in enumerate(rect_data[i][rect_mask[i] == 1]):
+            #         a, b, c, d = xxx
+            #         draw.rectangle((b, a, d, c), outline=(255, 0, 0))
+            #     for j, xxx in enumerate(rect_data[i][rect_mask[i] == 0]):
+            #         a, b, c, d = xxx
+            #         draw.rectangle((b, a, d, c), outline=(0, 0, 0))
 
             rgb_image = rgb_image.resize((gt_width, gt_height), Image.ANTIALIAS)
 
@@ -298,6 +304,10 @@ def evaluate(opt):
             pred_depth_image = colorize(torch.from_numpy(pred_depth*ratio).unsqueeze(0), vmin=0.0, vmax=cap_depth, cmap='viridis')
             pred_depth_image = Image.fromarray(pred_depth_image)
 
+            tof_depth = tof_depths[i]
+            tof_depth_image = colorize(torch.from_numpy(tof_depth), vmin=0.0, vmax=cap_depth, cmap='viridis')
+            tof_depth_image = Image.fromarray(tof_depth_image)
+            tof_depth_image = tof_depth_image.resize((gt_width,gt_height),Image.NEAREST)
 
             gt_depth_image = colorize(torch.from_numpy(gt_depth).unsqueeze(0), vmin=0.0, vmax=cap_depth, cmap='viridis')
             gt_depth_image = Image.fromarray(gt_depth_image)
@@ -312,6 +322,7 @@ def evaluate(opt):
             rgb_image.save(os.path.join(opt.load_weights_folder, opt.model_name, f"{impath}_rgb.jpg"))
             pred_depth_image.save(os.path.join(opt.load_weights_folder,opt.model_name , f"{impath}_pred_depth.jpg"))
             gt_depth_image.save(os.path.join(opt.load_weights_folder,opt.model_name , f"{impath}_gt_depth.jpg"))
+            tof_depth_image.save(os.path.join(opt.load_weights_folder,opt.model_name , f"{impath}_tof_depth.jpg"))
             error_image.save(os.path.join(opt.load_weights_folder, opt.model_name, f"{impath}_error.jpg"))
 
 

@@ -216,9 +216,8 @@ class MonoDataset(data.Dataset):
         do_flip = self.is_train and random.random() > 0.5
 
         line = self.filenames[index].split()
-        # line[-1] = '00272'
-        # line[-1] = '00027'
-        # line[-1] = '00056'
+        # line[-1] = '00075'
+        # line[-1] = '01386'
         folder = line[0]
 
         if len(line) >= 2:
@@ -270,7 +269,7 @@ class MonoDataset(data.Dataset):
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
-            if 'tof' in self.opt.sparse_d_type or True:
+            if 'tof' in self.opt.sparse_d_type:
                 if self.opt.drop_rate>0:
                     if self.is_test:
                         drop_mask = np.load(os.path.join(self.data_path, folder, "{:05d}".format(frame_index) + "_fixed_mask_drop_{}.npz").format(str(self.opt.drop_rate)))['fixed_mask']
@@ -278,6 +277,7 @@ class MonoDataset(data.Dataset):
                         drop_mask = np.load(os.path.join(self.data_path, folder, str(frame_index) + "_fixed_mask_drop_{}.npz").format(str(self.opt.drop_rate)))['fixed_mask']
                 else:
                     drop_mask = None
+
 
                 tof_depth,additional = self.get_tof_depth(inputs["depth_gt"],drop_mask)
 
