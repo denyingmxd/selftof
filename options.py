@@ -250,6 +250,7 @@ class MonodepthOptions:
         self.parser.add_argument("--depth_addition_type",default=0,type=int)
         self.parser.add_argument("--pose_addition_type",default=0,type=int)
         self.parser.add_argument("--drop_rate",default=0.0,type=float)
+        self.parser.add_argument("--gt_supervision",action="store_true")
 
 
 

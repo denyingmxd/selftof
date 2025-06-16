@@ -511,7 +511,17 @@ class Trainer_DDP:
                 losses["mean_loss/{}".format(scale)] = mean_loss
                 losses["std_loss/{}".format(scale)] = std_loss
 
+            if self.opt.gt_supervision:
+                loss = 0
+                depth_gt = F.interpolate(inputs["depth_gt"], [outputs[("depth", 0, scale)].shape[2], outputs[("depth", 0, scale)].shape[3]], mode="nearest")
+                valid_mask = depth_gt>0
+                pred_depth = outputs[("depth", 0, scale)]
+                depth_gt = depth_gt[valid_mask]
+                pred_depth = pred_depth[valid_mask]
+                depth_loss = F.l1_loss(depth_gt,pred_depth,reduction='mean')
 
+                losses["depth_loss/{}".format(scale)] = depth_loss
+                loss += depth_loss
 
             losses["loss/{}".format(scale)] = loss
             total_loss += loss

@@ -159,18 +159,18 @@ def evaluate(opt):
                 tof_mask.append(tof_mask_full)
 
 
-            # rgb_features,tof_features = encoder(input_color,data)
-            # output = depth_decoder(rgb_features, norm_pix_coords, data, opt, tof_features)
-            #
-            # pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
-            # pred_disp = pred_disp.cpu()[:, 0].numpy()
+            rgb_features,tof_features = encoder(input_color,data)
+            output = depth_decoder(rgb_features, norm_pix_coords, data, opt, tof_features)
+
+            pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
+            pred_disp = pred_disp.cpu()[:, 0].numpy()
 
             # nearest neighbor
-            pred_disp = 1./(data[('tof_depth',0)][0].detach().cpu().numpy()+1e-7)
-
-            # # # #GF
-            from some_codes.GF import upscale_depth
-            pred_disp = upscale_depth(pred_disp[0], data[("color", 0, 0)][0].numpy().transpose(1,2,0))[0][None,::]
+            # pred_disp = 1./(data[('tof_depth',0)][0].detach().cpu().numpy()+1e-7)
+            #
+            # # # # #GF
+            # from some_codes.GF import upscale_depth
+            # pred_disp = upscale_depth(pred_disp[0], data[("color", 0, 0)][0].numpy().transpose(1,2,0))[0][None,::]
 
 
             pred_disps.append(pred_disp)

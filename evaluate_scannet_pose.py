@@ -8,6 +8,8 @@ from __future__ import absolute_import, division, print_function
 
 import os, sys
 
+import cv2
+
 sys.path.append(os.getcwd())
 import numpy as np
 
@@ -22,7 +24,7 @@ import networks
 
 from tqdm import tqdm
 
-
+cv2.setNumThreads(0)
 def compute_pose_errors(gt, pr, opt):
     """from https://github.com/princeton-vl/DeepV2D/blob/master/evaluation/eval_utils.py
     """
@@ -86,6 +88,8 @@ def evaluate(opt):
     pose_errors = []
     pose_encoder, pose_decoder = prepare_model_for_test(opt)
 
+    # from evaluate_scannet_depth import prepare_model_for_test as prepare_depth_model_for_test
+    # depth_encoder, depth_decoder, _, _ = prepare_depth_model_for_test(opt)
     filenames = readlines('./splits/scannet_test_pose_deepv2d.txt')
     dataset = ScannetTestPoseDataset(
         opt.data_path,
@@ -124,6 +128,10 @@ def evaluate(opt):
                 axisangle[:, 0],
                 translation[:, 0]
             )
+            # rgb_features,tof_features = depth_encoder(inputs[("color", 0, 0)],inputs)
+            # output = depth_decoder(rgb_features, None, inputs, opt, tof_features)
+
+            # this_pose[:,:3,3] = this_pose[:,:3,3] * output[('global_ratio', 0)]
             this_pose = this_pose.data.cpu().numpy()[0]
             gt_pose = inputs['pose_gt'].data.cpu().numpy()[0]
             pose_errors.append(compute_pose_errors(gt_pose, this_pose,opt))

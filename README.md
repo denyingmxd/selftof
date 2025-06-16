@@ -1,106 +1,75 @@
-# PLNet
-The Pytorch code for our following paper
+# Self-Supervised Enhancement for Depth from a Lightweight ToF Sensor with Monocular Images 
+###  [Paper]
 
-> **PLNet: Plane and Line Priors for Unsupervised Indoor Depth Estimation**, [3DV 2021 (pdf)](https://arxiv.org/pdf/2110.05839.pdf)
->
-> [Hualie Jiang](https://hualie.github.io/), Laiyan Ding, Junjie Hu and Rui Huang
-
-![](./assets/visualization.png)
+[//]: # (The paper has been accepted to IROS 2025. The arxiv version of the paper is at [here]&#40;https://arxiv.org/pdf/2411.04480&#41;.)
+The paper has been accepted to IROS 2025. The arxiv version of the paper is will be uploaded soon.
 
 
-
-## Preparation
-
-#### Installation
-
-Install pytorch first by running
-
-```bash
-conda install pytorch=1.5.1 torchvision=0.6.1  cuda101 -c pytorch
-```
-
-Then install other requirements
-
+### Installation
 ```bash
 pip install -r requirements.txt
 ```
 
-#### Datasets & Preprocessing 
+### Prepare the data and pretrained model
+Please refer to [PLNet](https://github.com/HalleyJiang/PLNet) for the data preparation on NYU and ScanNet datasets.
 
-Please download preprocessed (sampled in 5 frames) [NYU-Depth-V2](https://drive.google.com/file/d/1WoOZOBpOWfmwe7bknWS5PMUCLBPFKTOw/view?usp=sharing) dataset by [Junjie Hu](https://scholar.google.com/citations?user=nuZZKu4AAAAJ&hl=en&oi=sra) and extract it. 
+Please download the pretrained model from [Baidu Yun](https://pan.baidu.com/s/1wUD3dv-E82oIz5UNjGcpwA) (password: fhpv) and put it in the correct directory and rename it to `best.pth`. 
 
-Extract the superpixels and line segments by excuting
-
+Specifically, 
+```bash
+change baseline.pt to best.pt and put it under train_deltar_change_embedding_no_clip_grad_hist_encoder_optimized_10x.pt,
 ```
-python extract_superpixel.py --data_path $DATA_PATH
-python extract_lineseg.py --data_path $DATA_PATH
+```bash
+change ours.pt to best.pt and put it under train_deltar_change_embedding_no_clip_grad_hist_encoder_optimized_10x_combine1.pt
+```
+The resulting structure should look sth like this:
+```
+selftof
+├── data
+│   ├── nyuv2_test
+│   └── demo
+│   └── nyu2_train
+└── tmp
+│   ├── mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_9_9
+│       └── models
+│           ├── Epoch 39
+│           │   └── encoder.pth
 ```
 
-
-
-## Try an image 
-
-run *depth_prediction_example.ipynb* with jupyter notebook
-
-
-
-## Training 
-
-#### Using 3 Frames
-
-```
-python train.py --data_path $DATA_PATH --model_name plnet_3f --frame_ids 0 -2 2 
-```
-
-#### Using 5 Frames
-
-Using the pretrained model from 3-frames setting gives better results.
-```
-python train.py --data_path $DATA_PATH --model_name plnet_5f --load_weights_folder models/plnet_3f --frame_ids 0 -4 -2 2 4
+### Command to train on the NYU dataset
+```bash
+python train.py @./exps/mono_rgbtof_tp_256_L2_2_0.01_scale_3.txt --port 16001
 ```
 
 
-
-## Evaluation  
-
-The pretrained models of our paper is available on [Google Drive](https://drive.google.com/file/d/1WaUutZLcJ8C2EudnCUV2Ei9aCy3OePaG/view?usp=sharing). 
-
-#### NYU Depth Estimation
+### Command to evaluate on the NYU and ZJUL5 dataset
+```bash
+python evaluate_all_nyu_depth.py @./exps/mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_9_9.txt --vis_epoch 39 --eval_min_depth 0.01 --eval_max_depth 10.0 --disable_median_scaling --eval_do_save
+python evaluate_all_nyu_depth.py @./exps/mono_drop_0.2_rgbtof_tp_256_L2_2_0.01_scale_3_enc_2_add_9_9.txt --eval_min_depth 0.01 --eval_max_depth 10.0 --disable_median_scaling 
 
 ```
-python evaluate_nyu_depth.py --data_path $DATA_PATH --load_weights_folder $MODEL_PATH 
-```
 
-#### ScanNet Depth Estimation
-
-```
-python evaluate_scannet_depth.py --data_path $DATA_PATH --load_weights_folder $MODEL_PATH 
-```
-
-#### ScanNet Pose Estimation
-
-```
-python evaluate_scannet_pose.py --data_path $DATA_PATH --load_weights_folder $MODEL_PATH --frame_ids 0 1 
-```
-
-Note: to evaluate on ScanNet, one has to download the preprocessed [data](https://onedrive.live.com/?authkey=%21ANXK7icE%2D33VPg0&id=C43E510B25EDDE99%21106&cid=C43E510B25EDDE99) by  P^2Net. 
+Note that we train on the NYU dataset and evaluate on both the NYU and ScanNet datasets. The model that perform the best
+on NYU dataset will be chosen to evaluate on both NYU and ScanNet datasets.
+If you do not set the selected_epoch, the code will go through all available epochs and generate an excel file that contains the result for all epochs.
 
 
-
-
-## Acknowledgements
-
-The project borrows codes from [Monodepth2](https://github.com/nianticlabs/monodepth2) and [P^2Net](https://github.com/svip-lab/Indoor-SfMLearner). Many thanks to their authors. 
 
 ## Citation
 
-Please cite our papers if you find our work useful in your research.
+If you find this code useful for your research, please use the following BibTeX entry. 
 
-```
-@inproceedings{jiang2021plnet,
-  title={PLNet: Plane and Line Priors for Unsupervised Indoor Depth Estimation},
-  author={Jiang, Hualie and Ding, Laiyan and Hu, Junjie and Huang, Rui},
-  booktitle={In IEEE International Conference on 3D Vision (3DV)},
-  year={2021}
+```bash
+@misc{ding2024cfpnet,
+    title={CFPNet: Improving Lightweight ToF Depth Completion via Cross-zone Feature Propagation},
+    author={Laiyan Ding and Hualie Jiang and Rui Xu and Rui Huang},
+    year={2024},
+    eprint={2411.04480},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV}
 }
 ```
+
+## Acknowledgements
+
+We would like to thank the authors of [DELTAR](https://github.com/zju3dv/deltar), [PLNet](https://github.com/HalleyJiang/PLNet) for open-sourcing their projects.
