@@ -1,8 +1,7 @@
 # Self-Supervised Enhancement for Depth from a Lightweight ToF Sensor with Monocular Images 
 ###  [Paper]
 
-[//]: # (The paper has been accepted to IROS 2025. The arxiv version of the paper is at [here]&#40;https://arxiv.org/pdf/2411.04480&#41;.)
-The paper has been accepted to IROS 2025. The arxiv version of the paper is will be uploaded soon.
+The paper has been accepted to IROS 2025. The arxiv version of the paper is at [here](https://arxiv.org/abs/2506.13444).
 
 
 ### Installation
