@@ -3,6 +3,10 @@
 
 The paper has been accepted to IROS 2025. The arxiv version of the paper is at [here](https://arxiv.org/abs/2506.13444).
 
+We also have another previous work CFPNet, which is a supervised framework focusing on handling cross-zone propagation. Interested readers may 
+go to the [paper](https://arxiv.org/pdf/2411.04480) and [code](https://github.com/denyingmxd/CFPNet) for more details.
+### Pipeline
+![pipeline](./figs/selftof.png)
 
 ### Installation
 ```bash
